@@ -30,7 +30,7 @@
             padding: 20px;
             box-sizing: border-box;
             font-family: 'Indie Flower', cursive;
-            font-size: 22px; /* 放大主文字 */
+            font-size: 22px;
             color: #4a2c0f;
             transform-origin: left;
             transition: transform 0.5s;
@@ -47,7 +47,7 @@
         h2 {
             text-align: center;
             margin-bottom: 10px;
-            font-size: 28px; /* 放大標題 */
+            font-size: 28px;
         }
         ul {
             padding-left: 20px;
@@ -55,12 +55,12 @@
         }
         .photo {
             width: 300px;
-            height: 521px; /* 按比例調整高度 (300 * 1335 / 768) */
+            height: 521px;
             border: 3px dashed #8b5a2b;
             box-shadow: 0 0 5px rgba(0,0,0,0.2);
             margin: 10px auto;
             display: block;
-            object-fit: cover; /* 確保圖片填滿不變形 */
+            object-fit: cover;
         }
         .photo-error {
             color: red;
@@ -70,15 +70,16 @@
         }
         .note {
             font-family: 'Caveat', cursive;
-            font-size: 24px; /* 放大手寫註解 */
+            font-size: 24px;
             color: #e63946;
             position: absolute;
             transform: rotate(-5deg);
         }
         #note1 { top: 650px; left: 50px; }
-        #note2 { top: 50px; right: 50px; }
-        #note3 { bottom: 50px; left: 100px; }
-        #note4 { bottom: 50px; right: 80px; }
+        #note2 { top: 650px; left: 50px; }
+        #note3 { top: 50px; right: 50px; }
+        #note4 { bottom: 50px; left: 100px; }
+        #note5 { bottom: 50px; right: 80px; }
         .nav-arrow {
             position: absolute;
             top: 50%;
@@ -112,45 +113,65 @@
 <body>
     <div id="book">
         <div id="page1" class="page active">
-            <h2>調查詢問技巧</h2>
+            <h2>&lt;夢幻餐飲顧問&gt;遊戲背景</h2>
             <ul>
-                <li>你是餐飲顧問兼創業新手，請用有禮貌且專業的語氣提問，例如「你好，我想要開店，可以提供我一些建議嗎？」</li>
-                <li>不要直接問答案，這樣人物不會回應，先試著問他們的背景，例如「你以前怎麼經營這間餐廳的？」。</li>
-                <li>之後可以再深入請教，例如「我想知道怎麼吸引顧客，你能不能告訴我？」這樣人物會講得更清楚。</li>
-                <li>問題要具體一點，例如「我該怎麼吸引顧客來餐廳消費？」別只打「顧客」這種太短的詞，人物可能不懂你的意思。</li>
-                <li>根據不同人物所在意的方向提問，例如張博文可能在意如何行銷、Nico可能在意客群，這樣比較能得到實用線索。</li>
+                <li>你將扮演Zac，一位懷抱餐飲夢想的年輕創業家。Zac出生於高雄，父母是計程車司機與市場攤販，從小在早餐店打工，培養了對餐飲的熱情。</li>
+                <li>他在高雄餐旅大學畢業後，累積了咖啡店與日式餐廳的經驗，卻因疫情失業，輾轉在小吃店工作。</li>
+                <li>2022年，他存下50萬創業資金，決心在台北開一家平價餐廳，實現夢想。</li>
+                <li>他看中了商業街的「和雅」餐廳，這間店由張博文經營14年，因市場變化關閉。</li>
+                <li>Zac遇到了前老闆張博文、美食網紅Nico與助理廚師Hank，準備展開調查。</li>
             </ul>
-            <span id="note1" class="note">記得問清楚哦！</span>
+            <h2>遊戲目標</h2>
+            <p>與張博文、Nico、Hank對話，蒐集線索，找出最適合新餐廳經營的策略，打造屬於你的成功餐廳！</p>
+            <h2>遊戲流程</h2>
+            <ul>
+                <li>在頁面中的人物對話框中，自由提問獲取線索。</li>
+                <li>蒐集到足夠線索後，點選下方的重點整理，選擇你認為正確的重點，如果選擇正確，會得到人物的經營祕訣。</li>
+                <li>將3位人物的經營秘訣文字輸入到最下方的策略筆記，送出後會進入餐廳經營規劃。</li>
+                <li>根據你得到的線索，選擇你認為最適合的餐廳經營策略，你會獲得最後的經營評價！</li>
+            </ul>
+            <span id="note1" class="note"></span>
         </div>
         <div id="page2" class="page hidden">
+            <h2>調查詢問技巧</h2>
+            <ul>
+                <li>把自己當成餐飲顧問兼創業新手，用輕鬆專業的語氣提問，例如「嘿，我要開店，你覺得哪裡最容易出問題？」而非制式的「請問問題是什麼」。</li>
+                <li>不要直接問答案，像「成本怎麼省？」這種問題人物不會回應，先試著問他們的背景，例如「你以前怎麼經營這店的？」。</li>
+                <li>再深入請教，例如「我想知道怎麼吸引顧客，你能不能告訴我？」這樣人物會講得更清楚。</li>
+                <li>問得具體一點，像聊生意經，例如「我該怎麼抓顧客的口味？」別只打「成本」這種太短的詞，人物可能不會懂。</li>
+                <li>根據不同人物在意的主題提問，例如問張博文行銷、問Nico客群，這樣能拿到實用線索。</li>
+            </ul>
+            <span id="note2" class="note">記得問清楚哦！</span>
+        </div>
+        <div id="page3" class="page hidden">
             <h2>我對張博文的調查結果顯示...</h2>
             <img src="zhang.jpg" alt="張博文" class="photo" id="photo-zhang">
             <div id="error-zhang" class="photo-error"></div>
             <ul>
                 <li>張博文是「和雅」前老闆，經營14年，經驗豐富，對自己的餐點品質很堅持，有點固執。</li>
-                <li>他可能在意餐點、成本、顧客、行銷。</li>
+                <li>他可能在意餐點、成本、顧客、行銷，這些是他關注的重點。</li>
             </ul>
-            <span id="note2" class="note">日式料理達人！</span>
+            <span id="note3" class="note">這傢伙很挑剔！</span>
         </div>
-        <div id="page3" class="page hidden">
+        <div id="page4" class="page hidden">
             <h2>我對Nico的調查結果顯示...</h2>
             <img src="nico.jpg" alt="Nico" class="photo" id="photo-nico">
             <div id="error-nico" class="photo-error"></div>
             <ul>
                 <li>Nico是美食網紅，對市場趨勢很敏感，講話直接、挑嘴，喜歡站在顧客立場看事情。</li>
-                <li>她可能在意用餐環境、餐點口味、服務、客群。</li>
+                <li>她可能在意用餐環境、餐點口味、服務、客群，這些是她關注的重點。</li>
             </ul>
-            <span id="note3" class="note">她很挑嘴！</span>
+            <span id="note4" class="note">她很會挑！</span>
         </div>
-        <div id="page4" class="page hidden">
+        <div id="page5" class="page hidden">
             <h2>我對Hank的調查結果顯示...</h2>
             <img src="hank.jpg" alt="Hank" class="photo" id="photo-hank">
             <div id="error-hank" class="photo-error"></div>
             <ul>
                 <li>Hank是「和雅」助理廚師，熟悉內場工作，為人老實容易緊張。</li>
-                <li>他可能在意人力、餐點製作、菜單、顧客反應。</li>
+                <li>他可能在意人力、餐點製作、菜單、顧客反應，這些是他關注的重點。</li>
             </ul>
-            <span id="note4" class="note">他很老實！</span>
+            <span id="note5" class="note">他很實在！</span>
         </div>
         <button id="prev" class="nav-arrow">◄</button>
         <button id="next" class="nav-arrow">►</button>
