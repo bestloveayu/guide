@@ -1,0 +1,16 @@
+<!-- 在<body>內的#game-container前加入 -->
+<button id="guide-btn">查看調查報告</button>
+<div id="guide-container" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 10;">
+    <iframe src="survey_guide.html" width="850" height="850" frameborder="0"></iframe>
+    <button onclick="toggleGuide()">關閉</button>
+</div>
+
+<script>
+    // 在final_strategy.html的<script>末尾加入
+    document.getElementById('guide-btn').addEventListener('click', toggleGuide);
+
+    function toggleGuide() {
+        const guide = document.getElementById('guide-container');
+        guide.style.display = guide.style.display === 'none' ? 'block' : 'none';
+    }
+</script>
