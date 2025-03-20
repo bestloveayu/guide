@@ -53,14 +53,25 @@
             padding-left: 20px;
             margin: 10px 0;
         }
-        .photo {
-            width: 300px;
-            height: 521px;
+        .comic-strip {
+            display: flex;
+            justify-content: space-between;
+            margin: 20px 0;
+        }
+        .comic-frame {
+            text-align: center;
+        }
+        .comic-frame img {
+            width: 150px;
+            height: 260px;
             border: 3px dashed #8b5a2b;
             box-shadow: 0 0 5px rgba(0,0,0,0.2);
-            margin: 10px auto;
-            display: block;
             object-fit: cover;
+        }
+        .comic-frame p {
+            margin: 5px 0 0 0;
+            font-size: 18px;
+            color: #4a2c0f;
         }
         .photo-error {
             color: red;
@@ -77,9 +88,9 @@
         }
         #note1 { top: 650px; left: 50px; }
         #note2 { top: 650px; left: 50px; }
-        #note3 { top: 50px; right: 50px; }
-        #note4 { bottom: 50px; left: 100px; }
-        #note5 { bottom: 50px; right: 80px; }
+        #note3 { top: 650px; left: 50px; }
+        #note4 { top: 650px; left: 50px; }
+        #note5 { top: 650px; left: 50px; }
         .nav-arrow {
             position: absolute;
             top: 50%;
@@ -113,7 +124,7 @@
 <body>
     <div id="book">
         <div id="page1" class="page active">
-            <h2>&lt;夢幻餐飲顧問&gt;遊戲背景</h2>
+            <h2><夢幻餐飲顧問>遊戲背景</h2>
             <ul>
                 <li>你將扮演Zac，一位懷抱餐飲夢想的年輕創業家。Zac出生於高雄，父母是計程車司機與市場攤販，從小在早餐店打工，培養了對餐飲的熱情。</li>
                 <li>他在高雄餐旅大學畢業後，累積了咖啡店與日式餐廳的經驗，卻因疫情失業，輾轉在小吃店工作。</li>
@@ -130,7 +141,7 @@
                 <li>將3位人物的經營秘訣文字輸入到最下方的策略筆記，送出後會進入餐廳經營規劃。</li>
                 <li>根據你得到的線索，選擇你認為最適合的餐廳經營策略，你會獲得最後的經營評價！</li>
             </ul>
-            <span id="note1" class="note"></span>
+            <span id="note1" class="note">開始調查吧！</span>
         </div>
         <div id="page2" class="page hidden">
             <h2>調查詢問技巧</h2>
@@ -145,33 +156,81 @@
         </div>
         <div id="page3" class="page hidden">
             <h2>我對張博文的調查結果...</h2>
-            <img src="zhang.jpg" alt="張博文" class="photo" id="photo-zhang">
-            <div id="error-zhang" class="photo-error"></div>
             <ul>
                 <li>張博文是「和雅」前老闆，經營14年，經驗豐富，對自己的餐點品質很堅持，有點固執。</li>
-                <li>他可能在意餐點、成本、顧客、行銷，這些是他關注的重點。</li>
+                <li>他可能在意餐點、成本、顧客、行銷。</li>
             </ul>
+            <div class="comic-strip">
+                <div class="comic-frame">
+                    <img src="zhang_1.jpg" alt="張博文分鏡1">
+                    <p>當年遠赴日本料理店認真學習。</p>
+                </div>
+                <div class="comic-frame">
+                    <img src="zhang_2.jpg" alt="張博文分鏡2">
+                    <p>回國後開了新餐廳，一開始人潮爆滿。</p>
+                </div>
+                <div class="comic-frame">
+                    <img src="zhang_3.jpg" alt="張博文分鏡3">
+                    <p>之後餐廳每況愈下，生意冷清。</p>
+                </div>
+                <div class="comic-frame">
+                    <img src="zhang_4.jpg" alt="張博文分鏡4">
+                    <p>最終他關掉餐廳，宣布倒閉。</p>
+                </div>
+            </div>
             <span id="note3" class="note">日式料理達人！</span>
         </div>
         <div id="page4" class="page hidden">
             <h2>我對Nico的調查結果...</h2>
-            <img src="nico.jpg" alt="Nico" class="photo" id="photo-nico">
-            <div id="error-nico" class="photo-error"></div>
             <ul>
                 <li>Nico是美食網紅，對市場趨勢很敏感，講話直接、挑嘴，喜歡站在顧客立場看事情。</li>
-                <li>她可能在意用餐環境、餐點口味、服務、客群，這些是她關注的重點。</li>
+                <li>她可能在意用餐環境、餐點口味、服務、客群。</li>
             </ul>
-            <span id="note4" class="note">挑嘴的美食網紅！</span>
+            <div class="comic-strip">
+                <div class="comic-frame">
+                    <img src="nico_1.jpg" alt="Nico分鏡1">
+                    <p>最早嘗試拍攝美食直播。</p>
+                </div>
+                <div class="comic-frame">
+                    <img src="nico_2.jpg" alt="Nico分鏡2">
+                    <p>她對食物特別挑剔。</p>
+                </div>
+                <div class="comic-frame">
+                    <img src="nico_3.jpg" alt="Nico分鏡3">
+                    <p>之後直播越來越受歡迎，粉絲眾多。</p>
+                </div>
+                <div class="comic-frame">
+                    <img src="nico_4.jpg" alt="Nico分鏡4">
+                    <p>展現美食評論專業，成為網紅。</p>
+                </div>
+            </div>
+            <span id="note4" class="note">她很挑嘴！</span>
         </div>
         <div id="page5" class="page hidden">
             <h2>我對Hank的調查結果...</h2>
-            <img src="hank.jpg" alt="Hank" class="photo" id="photo-hank">
-            <div id="error-hank" class="photo-error"></div>
             <ul>
-                <li>Hank是「和雅」助理廚師，熟悉內場工作，為人老實容易緊張。</li>
-                <li>他可能在意人力、餐點製作、菜單、顧客反應，這些是他關注的重點。</li>
+                <li>Hank是助理廚師，熟悉內場工作，為人老實容易緊張。</li>
+                <li>他可能在意人力、餐點製作、菜單、顧客反應。</li>
             </ul>
-            <span id="note5" class="note">誠實又可靠！</span>
+            <div class="comic-strip">
+                <div class="comic-frame">
+                    <img src="hank_1.jpg" alt="Hank分鏡1">
+                    <p>當年第一次擔任主廚，略顯緊張。</p>
+                </div>
+                <div class="comic-frame">
+                    <img src="hank_2.jpg" alt="Hank分鏡2">
+                    <p>之後努力工作，專注製作餐點。</p>
+                </div>
+                <div class="comic-frame">
+                    <img src="hank_3.jpg" alt="Hank分鏡3">
+                    <p>開始受到顧客好評。</p>
+                </div>
+                <div class="comic-frame">
+                    <img src="hank_4.jpg" alt="Hank分鏡4">
+                    <p>不巧公司關閉，他即將失業。</p>
+                </div>
+            </div>
+            <span id="note5" class="note">誠實可靠！</span>
         </div>
         <button id="prev" class="nav-arrow">◄</button>
         <button id="next" class="nav-arrow">►</button>
@@ -182,21 +241,22 @@
         let currentPage = 0;
 
         // 檢查圖片是否載入
-        function checkImageLoad(imgId, errorId) {
-            const img = document.getElementById(imgId);
-            const errorDiv = document.getElementById(errorId);
+        function checkImageLoad(img) {
             img.onerror = () => {
-                errorDiv.textContent = '圖片載入失敗，請檢查檔案路徑或格式！';
+                img.nextElementSibling.textContent = '圖片載入失敗，請檢查檔案路徑或格式！';
             };
             img.onload = () => {
-                errorDiv.textContent = '';
+                img.nextElementSibling.textContent = '';
             };
         }
 
-        // 檢查所有圖片
-        checkImageLoad('photo-zhang', 'error-zhang');
-        checkImageLoad('photo-nico', 'error-nico');
-        checkImageLoad('photo-hank', 'error-hank');
+        // 檢查所有分鏡圖片
+        document.querySelectorAll('.comic-frame img').forEach(img => {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'photo-error';
+            img.parentNode.insertBefore(errorDiv, img.nextSibling);
+            checkImageLoad(img);
+        });
 
         // 翻頁控制
         document.getElementById('prev').addEventListener('click', () => {
