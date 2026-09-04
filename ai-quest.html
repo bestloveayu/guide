@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI知識王國 - 提問品質分析與知識地圖探索</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Caveat:wght@600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --wood-dark:#4a2c0f;
+    --wood:#8b5a2b;
+    --wood-light:#d3b683;
+    --parchment:#f5e8c7;
+    --ink:#2c1c0a;
+    --ink-soft:#6b5638;
+    --panel-surface:#fcfcfb;
+    --panel-border:rgba(11,11,11,0.10);
+    --npc-bubble:#eef2f7;
+    --user-bubble:#2a78d6;
+    --user-bubble-text:#ffffff;
+    --muted:#898781;
+    --good:#0ca30c;
+    --danger:#d03b3b;
+    --seq-100:#cde2fb; --seq-200:#9ec5f4; --seq-300:#6da7ec; --seq-400:#3987e5;
+    --seq-500:#256abf; --seq-600:#184f95; --seq-700:#0d366b;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:'Noto Sans TC', system-ui, -apple-system, sans-serif;
+    background:linear-gradient(180deg,#2b1d10,#1c130a); color:var(--ink); min-height:100vh;
+  }
+  header{
+    background:linear-gradient(180deg,var(--wood),var(--wood-dark));
+    color:#fff7e6; padding:14px 20px; display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+    box-shadow:0 2px 8px rgba(0,0,0,0.4);
+  }
+  header h1{
+    margin:0; font-size:22px; font-weight:900; letter-spacing:1px;
+  }
+  header .subtitle{font-size:12px; opacity:0.85; margin-top:2px;}
+  header .title-block{margin-right:auto;}
+  .hud{display:flex; gap:10px; flex-wrap:wrap;}
+  .hud-chip{
+    background:rgba(0,0,0,0.25); border:1px solid rgba(255,247,230,0.25); border-radius:10px;
+    padding:6px 12px; font-size:12px; text-align:center; min-width:84px;
+  }
+  .hud-chip b{display:block; font-size:16px; font-weight:900;}
+  button{
+    font-family:inherit; cursor:pointer; border:none; border-radius:8px; font-weight:700;
+  }
+  .btn-primary{
+    background:#eb6834; color:#fff; padding:9px 16px; font-size:14px;
+    box-shadow:0 2px 0 #a8471d;
+  }
+  .btn-primary:hover{background:#f1793f;}
+  .btn-secondary{
+    background:#fff7e6; color:var(--wood-dark); padding:8px 14px; font-size:13px; border:1px solid var(--wood);
+  }
+  .btn-secondary:hover{background:#fff0d0;}
+  .btn-secondary:disabled{opacity:0.45; cursor:not-allowed;}
+
+  main{
+    display:grid; grid-template-columns:minmax(300px,380px) 1fr; gap:16px;
+    padding:16px; max-width:1400px; margin:0 auto;
+  }
+  @media (max-width:920px){ main{grid-template-columns:1fr;} }
+
+  .panel{
+    background:var(--panel-surface); border:1px solid var(--panel-border); border-radius:12px;
+    box-shadow:0 4px 14px rgba(0,0,0,0.35); display:flex; flex-direction:column; overflow:hidden;
+  }
+  .panel-title{
+    padding:10px 14px; font-weight:700; font-size:14px; color:var(--wood-dark);
+    background:var(--wood-light); border-bottom:1px solid var(--panel-border);
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+  }
+  .panel-title small{font-weight:400; color:#5a4223; font-size:11px;}
+
+  /* Chat panel */
+  #chat-panel{height:calc(100vh - 96px); min-height:520px;}
+  #chat-log{flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; background:#fbf9f4;}
+  .msg{max-width:86%; display:flex; flex-direction:column; gap:3px;}
+  .msg.npc{align-self:flex-start;}
+  .msg.user{align-self:flex-end; align-items:flex-end;}
+  .bubble{
+    padding:9px 12px; border-radius:14px; font-size:14.5px; line-height:1.5; word-break:break-word;
+  }
+  .msg.npc .bubble{background:var(--npc-bubble); color:#1d2733; border-bottom-left-radius:4px;}
+  .msg.user .bubble{background:var(--user-bubble); color:var(--user-bubble-text); border-bottom-right-radius:4px;}
+  .npc-name{font-size:11px; color:var(--muted); margin-left:2px;}
+  .msg-tag{font-size:11px; color:var(--muted); margin-right:2px;}
+  .msg-tag.on{color:var(--good);}
+  .msg-tag.off{color:var(--muted); font-style:italic;}
+  #chat-form{display:flex; gap:8px; padding:10px; border-top:1px solid var(--panel-border); background:#fff;}
+  #chat-input{
+    flex:1; padding:10px 12px; border-radius:20px; border:1px solid #cfcac0; font-size:14.5px; font-family:inherit;
+  }
+  #chat-input:focus{outline:2px solid var(--user-bubble);}
+
+  /* Right column */
+  #viz-col{display:flex; flex-direction:column; gap:16px;}
+
+  /* Map panel */
+  #map-wrap{position:relative; background:#0d0d0d;}
+  #map-svg{display:block; width:100%; height:auto;}
+  .map-progress{padding:8px 14px; font-size:12px; color:#cfcac0; background:#111; display:flex; align-items:center; gap:10px;}
+  .map-progress .bar{flex:1; height:8px; background:#333; border-radius:5px; overflow:hidden;}
+  .map-progress .bar-fill{height:100%; background:linear-gradient(90deg,#eb6834,#f1a34f); width:0%; transition:width .4s;}
+
+  /* Quadrant panel */
+  #quad-svg{display:block; width:100%; height:auto; background:var(--panel-surface);}
+  .quad-controls{display:flex; align-items:center; gap:14px; padding:8px 14px; font-size:12px; color:var(--muted); border-top:1px solid var(--panel-border); flex-wrap:wrap;}
+  .legend{display:flex; align-items:center; gap:6px;}
+  .legend .swatch-grad{width:64px; height:10px; border-radius:5px; background:linear-gradient(90deg,var(--seq-100),var(--seq-700)); border:1px solid var(--panel-border);}
+
+  /* tooltip */
+  #tooltip{
+    position:fixed; pointer-events:none; background:#1d2733; color:#fff; font-size:12px; padding:6px 9px;
+    border-radius:6px; max-width:240px; line-height:1.4; z-index:50; display:none; box-shadow:0 4px 10px rgba(0,0,0,0.4);
+  }
+
+  /* Modals */
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(10,6,2,0.72); display:none; align-items:center; justify-content:center;
+    z-index:100; padding:20px;
+  }
+  .modal-overlay.show{display:flex;}
+  .modal-box{
+    background:var(--parchment); border:3px solid var(--wood); border-radius:14px; max-width:640px; width:100%;
+    max-height:88vh; overflow-y:auto; padding:22px 26px; box-shadow:0 10px 40px rgba(0,0,0,0.5);
+  }
+  .modal-box h2{margin-top:0; color:var(--wood-dark); font-family:'Caveat',cursive; font-size:34px;}
+  .stat-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:16px 0;}
+  .stat-card{background:#fffaf0; border:1px solid var(--wood-light); border-radius:10px; padding:10px 12px;}
+  .stat-card .label{font-size:12px; color:var(--ink-soft);}
+  .stat-card .value{font-size:22px; font-weight:900; color:var(--wood-dark);}
+  .modal-actions{display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;}
+  .modal-close{float:right; background:none; color:var(--ink-soft); font-size:20px; padding:0 6px;}
+
+  #report-preview{width:100%; border:1px solid var(--wood-light); border-radius:8px; margin-top:10px; display:none;}
+
+  .victory-badge{
+    display:inline-block; background:#eb6834; color:#fff; font-weight:900; padding:4px 12px; border-radius:20px;
+    font-size:13px; margin-bottom:8px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title-block">
+    <h1>AI知識王國</h1>
+    <div class="subtitle">向AI夥伴提問，解開迷霧、蓋起你的知識王國</div>
+  </div>
+  <div class="hud">
+    <div class="hud-chip">提問次數<b id="hud-count">0</b></div>
+    <div class="hud-chip">王國建立度<b id="hud-kingdom">0%</b></div>
+  </div>
+  <button class="btn-secondary" id="restart-btn">重新開始</button>
+  <button class="btn-primary" id="end-btn">結束遊戲並產生報告</button>
+</header>
+
+<main>
+  <section class="panel" id="chat-panel">
+    <div class="panel-title">對話 · AI夥伴「小知」<small>輸入問題，按 Enter 送出</small></div>
+    <div id="chat-log"></div>
+    <form id="chat-form">
+      <input id="chat-input" type="text" autocomplete="off" placeholder="輸入你想問小知的問題...">
+      <button class="btn-primary" type="submit">送出</button>
+    </form>
+  </section>
+
+  <section id="viz-col">
+    <div class="panel" id="map-panel">
+      <div class="panel-title">知識地圖探索<small>迷霧 = 尚未觸及的知識 · 建築高度 = 提問深度</small></div>
+      <div id="map-wrap">
+        <svg id="map-svg" viewBox="0 0 480 320" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+      <div class="map-progress">
+        <span>探索進度</span>
+        <div class="bar"><div class="bar-fill" id="map-bar"></div></div>
+        <span id="map-pct">0%</span>
+      </div>
+    </div>
+
+    <div class="panel" id="quad-panel">
+      <div class="panel-title">即時提問品質象限圖<small>橫軸：廣度　縱軸：深度</small></div>
+      <svg id="quad-svg" viewBox="0 0 420 300" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div class="quad-controls">
+        <label><input type="checkbox" id="toggle-numbers" checked> 顯示提問編號</label>
+        <div class="legend">顏色（淺→深）＝提問先後 <div class="swatch-grad"></div></div>
+        <div class="legend">外框愈粗＝重複提問</div>
+        <div class="legend">連線愈粗＝與前一題關聯愈高</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="tooltip"></div>
+
+<div class="modal-overlay" id="victory-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeVictory()">×</button>
+    <span class="victory-badge">王國建立完成</span>
+    <h2>恭喜！你已經解開整片知識王國的迷霧</h2>
+    <p>你已經在每個知識領域都提出足夠深入的問題，整座王國的建築都已經蓋到最高等級。你可以繼續提問，或按下「結束遊戲並產生報告」查看完整成果。</p>
+    <div class="modal-actions">
+      <button class="btn-primary" onclick="closeVictory(); endGame();">查看完整報告</button>
+      <button class="btn-secondary" onclick="closeVictory()">繼續探索</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="report-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeReport()">×</button>
+    <h2 id="report-title">你的提問品質報告</h2>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="label">提問次數</div><div class="value" id="r-count">0</div></div>
+      <div class="stat-card"><div class="label">與主題關聯性比例</div><div class="value" id="r-relevance">0%</div></div>
+      <div class="stat-card"><div class="label">提問層次高低</div><div class="value" id="r-depth">0%</div></div>
+      <div class="stat-card"><div class="label">提問廣度</div><div class="value" id="r-breadth">0%</div></div>
+      <div class="stat-card"><div class="label">王國建立程度</div><div class="value" id="r-kingdom">0%</div></div>
+    </div>
+    <canvas id="report-canvas" width="1000" height="1650" style="display:none;"></canvas>
+    <img id="report-preview" alt="報告預覽">
+    <div class="modal-actions">
+      <button class="btn-primary" id="gen-report-btn">產生報告圖檔</button>
+      <button class="btn-secondary" id="dl-report-btn" disabled>下載報告圖檔</button>
+      <button class="btn-secondary" id="dl-quad-btn">下載提問品質圖</button>
+      <button class="btn-secondary" id="dl-map-btn">下載知識地圖</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ---------------------------------------------------------------------
+ * 1. Knowledge map data
+ * ------------------------------------------------------------------- */
+var NODES = [
+  { id:"sl", name:"監督式學習", x:150, y:90,
+    keywords:["監督式","監督學習","有標籤","標記資料","標籤資料","分類","迴歸","regression","classification","supervised","label"],
+    def:"監督式學習是用「有標籤」的資料訓練模型，每筆訓練資料都附上正確答案，讓模型學會從輸入預測輸出。",
+    example:"常見例子像是用貓狗照片訓練分類模型、用歷史房價資料預測房價，這些都是監督式學習的應用。",
+    mechanism:"訓練時模型會先做出預測，再和標籤答案比對誤差，透過反覆調整參數（例如梯度下降）讓預測越來越接近正確答案。",
+    deeper:"監督式學習的品質很依賴標籤資料的質與量，標籤成本高、資料偏差都可能讓模型學到錯誤的規則，這也是它和非監督式學習最大的取捨。" },
+  { id:"ul", name:"非監督式學習", x:150, y:250,
+    keywords:["非監督式","非監督學習","分群","聚類","clustering","降維","unsupervised","無標籤","沒有標籤"],
+    def:"非監督式學習是在「沒有標準答案」的資料中，讓模型自己找出資料裡的規律或結構。",
+    example:"像是把顧客依購買行為自動分群、或是把新聞文章依主題聚類，都是非監督式學習常見的應用。",
+    mechanism:"常見做法是計算資料點之間的相似度或距離，再用演算法（例如K-means分群）把相近的資料歸在同一群。",
+    deeper:"因為沒有標籤可以對答案，非監督式學習的結果比較難用單一指標評估好壞，通常需要人再去解讀分出來的群組是否有意義。" },
+  { id:"rl", name:"強化學習", x:270, y:280,
+    keywords:["強化學習","reinforcement","獎勵","懲罰","reward","policy","策略","代理人","agent","q-learning"],
+    def:"強化學習是讓一個「代理人」在環境中不斷嘗試行動，根據得到的獎勵或懲罰調整之後的行為策略。",
+    example:"像AlphaGo學下圍棋、機器人學走路、遊戲AI學過關，都是透過強化學習不斷試錯進步的例子。",
+    mechanism:"代理人在每個時間點觀察環境狀態、選擇一個行動，環境會回饋獎勵訊號，代理人的目標是學到一套策略，讓長期累積的獎勵最大化。",
+    deeper:"強化學習的挑戰在於「探索與利用」的平衡——要嘗試新行動找更好的策略，還是先用目前已知最好的策略，這個取捨會直接影響學習效率。" },
+  { id:"nn", name:"類神經網路與深度學習", x:230, y:170,
+    keywords:["神經網路","類神經","深度學習","deep learning","neural network","反向傳播","cnn","rnn","transformer"],
+    def:"類神經網路是模仿大腦神經元互相連結的運算架構，由一層層的節點組成；當網路層數很多時，就稱為深度學習。",
+    example:"圖片辨識用的CNN、處理語言的Transformer（像ChatGPT背後的架構），都是深度學習的代表。",
+    mechanism:"資料從輸入層一層層往前傳遞並產生預測，再用「反向傳播」演算法把預測誤差往回傳，逐層調整每個連結的權重。",
+    deeper:"深度學習雖然強大，但需要大量資料和運算資源，而且模型判斷的過程不容易解釋，這也是「可解釋AI」想解決的問題。" },
+  { id:"data", name:"資料與特徵工程", x:70, y:170,
+    keywords:["資料集","特徵","feature","資料前處理","標註","資料清理","訓練資料","dataset"],
+    def:"特徵工程是把原始資料整理、轉換成模型容易學習的輸入格式，例如挑出關鍵欄位、正規化數值。",
+    example:"像是把「出生年月日」轉換成「年齡」，或是把文字轉成數字向量，都是特徵工程常見的做法。",
+    mechanism:"工程師會先清理缺漏或錯誤的資料，再挑選、組合有意義的特徵，有時也會用演算法自動學習特徵（例如深度學習）。",
+    deeper:"資料的品質往往比模型演算法更關鍵，如果訓練資料本身有偏差或雜訊，模型學到的規則也會跟著出問題，這就是「garbage in, garbage out」。" },
+  { id:"eval", name:"模型評估與過擬合", x:190, y:40,
+    keywords:["過擬合","overfitting","準確率","accuracy","驗證","測試集","泛化","underfitting","欠擬合"],
+    def:"模型評估是用測試資料檢查模型學得好不好，過擬合則是模型把訓練資料「背」得太熟，導致遇到新資料表現變差。",
+    example:"像是學生只背題庫答案、考試換一種問法就不會寫，模型過度記住訓練資料細節，也是類似的狀況。",
+    mechanism:"常見做法是把資料切成訓練集和測試集，模型只用訓練集學習，再用沒看過的測試集檢查準確率、評估泛化能力。",
+    deeper:"要避免過擬合，可以用更多資料、簡化模型或加入正則化等技巧；模型太簡單學不好稱為欠擬合，兩者要取得平衡。" },
+  { id:"gen", name:"生成式AI", x:330, y:170,
+    keywords:["生成式","generative","chatgpt","大型語言模型","llm","diffusion","生成圖片","文字生成","gpt"],
+    def:"生成式AI是能自己「創造」新內容的AI，像是文字、圖片、聲音，而不只是分類或預測既有資料。",
+    example:"像ChatGPT生成文章、Midjourney生成圖片，都是生成式AI的代表應用，背後常用大型語言模型或擴散模型技術。",
+    mechanism:"這類模型通常是先在大量資料上學習資料的機率分佈規律，再根據輸入的提示，一步步生成看起來合理的新內容。",
+    deeper:"生成式AI可能會產生看似合理但其實錯誤的內容（幻覺），使用時需要人判斷內容真假，也牽涉到著作權與資料來源的爭議。" },
+  { id:"ethics", name:"AI倫理與偏見", x:410, y:90,
+    keywords:["倫理","偏見","bias","公平","fairness","歧視","隱私","privacy","責任"],
+    def:"AI倫理關心AI系統對社會、個人可能造成的影響，包括資料隱私、演算法是否公平，以及誰該為AI的決策負責。",
+    example:"像是徵才AI因為訓練資料偏向某個性別而歧視求職者，或是人臉辨識對特定族群誤判率較高，都是常見的AI偏見案例。",
+    mechanism:"偏見通常來自訓練資料本身反映了社會既有的不平等，模型學習這些資料後，會把偏差也一併學進模型裡並放大。",
+    deeper:"要減少AI偏見，需要在資料蒐集、模型設計、上線後監控等多個環節把關，同時也要思考法規、透明度和究責機制，這不是單靠技術就能解決的問題。" },
+  { id:"app", name:"AI社會應用與生活", x:410, y:250,
+    keywords:["應用","生活","醫療","自駕車","社會","案例"],
+    def:"AI已經廣泛應用在生活各個層面，從推薦系統、醫療影像判讀，到自駕車、客服聊天機器人都看得到AI的身影。",
+    example:"像是串流平台的影片推薦、醫院用AI輔助判讀X光片、手機的語音助理，都是AI在生活中的實際應用。",
+    mechanism:"這些應用背後通常結合了監督式學習（例如判讀影像）、強化學習（例如自駕車決策）等不同技術，依照任務需求組合使用。",
+    deeper:"AI應用在重要領域（如醫療、司法、金融）時，除了準確度，還要考慮誤判的後果、使用者是否理解AI的限制，這也呼應了AI素養的重要性。" }
+];
+
+var EDGES = [
+  ["sl","data","監督式學習的表現很大程度取決於資料與特徵工程做得好不好，資料的品質往往比模型本身更重要。"],
+  ["ul","data","非監督式學習雖然不需要標籤，但資料前處理和特徵選擇一樣重要，會直接影響分群或降維的結果。"],
+  ["sl","nn","類神經網路是監督式學習中很常用的模型架構，透過大量標籤資料訓練出強大的分類或預測能力。"],
+  ["ul","nn","類神經網路也能用在非監督式學習上，例如用自編碼器（autoencoder）學習資料的壓縮表示。"],
+  ["rl","nn","深度強化學習就是把類神經網路和強化學習結合，用神經網路來逼近複雜環境下的策略或價值函數。"],
+  ["sl","eval","評估監督式學習模型時要特別注意過擬合，模型在訓練資料表現很好，不代表在新資料上也會一樣準。"],
+  ["nn","eval","深度學習模型參數多、容量大，特別容易過擬合，需要透過驗證集和正則化技巧來控制。"],
+  ["nn","gen","生成式AI（例如大型語言模型）背後就是用深度神經網路（如Transformer）訓練出來的。"],
+  ["gen","ethics","生成式AI越來越強大，也讓內容真偽、著作權、偏見等AI倫理議題變得更重要。"],
+  ["gen","app","生成式AI已經被廣泛應用在生活中，從寫作助理到客服機器人，都能看到它的身影。"],
+  ["ethics","app","AI應用到醫療、金融、司法等重要生活領域時，公平性與倫理考量會直接影響很多人的權益。"]
+];
+
+var nodeById = {};
+NODES.forEach(function(n){ nodeById[n.id] = n; n.reveal = 0; n.tier = 0; });
+var edgeKey = function(a,b){ return [a,b].sort().join("-"); };
+var edgeById = {};
+EDGES.forEach(function(e){ edgeById[edgeKey(e[0],e[1])] = { a:e[0], b:e[1], text:e[2], reveal:0 }; });
+
+/* ---------------------------------------------------------------------
+ * 2. Question classification
+ * ------------------------------------------------------------------- */
+function hashStr(s, salt){
+  var h = 5381;
+  s = s + "|" + salt;
+  for (var i=0;i<s.length;i++){ h = ((h<<5)+h+s.charCodeAt(i))|0; }
+  return Math.abs(h) % 1000 / 1000;
+}
+
+function normalize(text){ return text.trim().replace(/\s+/g,"").toLowerCase(); }
+
+function isQuestion(text){
+  var t = text.trim();
+  if (!t) return false;
+  if (/[?？]/.test(t)) return true;
+  if (/^(為什麼|為何|怎麼|怎樣|如何|什麼|何時|誰|哪|是否|能不能|能否|可不可以|可以嗎|多少|幾)/.test(t)) return true;
+  if (/(嗎|呢)[!！]?$/.test(t)) return true;
+  return false;
+}
+
+function matchNodes(text){
+  var lower = text.toLowerCase();
+  var scored = [];
+  NODES.forEach(function(n){
+    var score = 0;
+    n.keywords.forEach(function(k){ if (lower.indexOf(k.toLowerCase()) !== -1) score++; });
+    if (score > 0) scored.push({ id:n.id, score:score });
+  });
+  scored.sort(function(a,b){ return b.score - a.score; });
+  return scored.map(function(s){ return s.id; });
+}
+
+function depthTier(text){
+  var basic = /(是什麼|什麼是|定義|介紹一下|簡單說|基本上)/;
+  var applied = /(舉例|例子|應用|用在|實際|案例|生活中)/;
+  var mechanism = /(為什麼|為何|如何運作|怎麼運作|原理|機制|怎麼訓練|如何訓練|運作方式|怎麼算)/;
+  var evaluative = /(比較|差異|不同|優缺點|優點|缺點|適合|應該|風險|限制|影響|該不該|哪個比較好|取捨)/;
+  var tier = 1;
+  if (basic.test(text)) tier = Math.max(tier,1);
+  if (applied.test(text)) tier = Math.max(tier,2);
+  if (mechanism.test(text)) tier = Math.max(tier,3);
+  if (evaluative.test(text)) tier = Math.max(tier,4);
+  return tier;
+}
+
+function classify(text){
+  var q = isQuestion(text);
+  var matched = q ? matchNodes(text) : [];
+  var tier = q ? depthTier(text) : 0;
+  return { isQuestion:q, matched:matched, tier:tier };
+}
+
+/* ---------------------------------------------------------------------
+ * 3. State
+ * ------------------------------------------------------------------- */
+var state = {
+  questionCount: 0,
+  onTopicCount: 0,
+  tierSum: 0,
+  touchedNodes: {},
+  points: [],          // plotted points: {n, x, y, tier, matched, text, repeat, strokeW}
+  pointsByKey: {},      // normText -> point
+  lastPlotted: null,
+  won: false
+};
+
+/* ---------------------------------------------------------------------
+ * 4. NPC reply generation
+ * ------------------------------------------------------------------- */
+var offTopicReplies = [
+  "這個問題有點超出我目前熟悉的範圍，我對AI技術和AI素養比較了解，你可以再問問看。",
+  "嗯...這部分我還沒有相關的資料可以回答你，你可以繼續問我AI相關的問題喔。",
+  "抱歉，我對這個不太熟悉，換個AI主題問問我吧。"
+];
+var offTopicIdx = 0;
+
+function tierText(node, tier){
+  if (tier >= 4 && node.deeper) return node.deeper;
+  if (tier >= 3 && node.mechanism) return node.mechanism;
+  if (tier >= 2 && node.example) return node.example;
+  return node.def;
+}
+
+function npcReply(result){
+  if (!result.isQuestion){
+    var acks = ["原來如此，了解！","好的，謝謝你告訴我。","我知道了，那我們繼續吧。"];
+    return acks[state.questionCount % acks.length];
+  }
+  if (result.matched.length === 0){
+    var r = offTopicReplies[offTopicIdx % offTopicReplies.length];
+    offTopicIdx++;
+    return r;
+  }
+  if (result.matched.length === 1){
+    return tierText(nodeById[result.matched[0]], result.tier);
+  }
+  var a = result.matched[0], b = result.matched[1];
+  var e = edgeById[edgeKey(a,b)];
+  var core = e ? e.text : (nodeById[a].def + " 另外，" + nodeById[b].def);
+  if (result.tier >= 4){
+    core += " " + tierText(nodeById[a], 4);
+  }
+  return core;
+}
+
+/* ---------------------------------------------------------------------
+ * 5. Chat rendering
+ * ------------------------------------------------------------------- */
+var chatLog = document.getElementById("chat-log");
+function addMessage(role, text, tag){
+  var wrap = document.createElement("div");
+  wrap.className = "msg " + role;
+  if (role === "npc"){
+    var name = document.createElement("div");
+    name.className = "npc-name";
+    name.textContent = "小知";
+    wrap.appendChild(name);
+  }
+  var bubble = document.createElement("div");
+  bubble.className = "bubble";
+  bubble.textContent = text;
+  wrap.appendChild(bubble);
+  if (tag){
+    var tagEl = document.createElement("div");
+    tagEl.className = "msg-tag " + tag.cls;
+    tagEl.textContent = tag.text;
+    wrap.appendChild(tagEl);
+  }
+  chatLog.appendChild(wrap);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+/* ---------------------------------------------------------------------
+ * 6. Map rendering (fog of war + buildings)
+ * ------------------------------------------------------------------- */
+var svgNS = "http://www.w3.org/2000/svg";
+var mapSvg = document.getElementById("map-svg");
+
+function el(tag, attrs){
+  var e = document.createElementNS(svgNS, tag);
+  for (var k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+var revealShapesG, buildingsG, markersG;
+
+function initMap(){
+  mapSvg.innerHTML = "";
+  var defs = el("defs", {});
+  var filter = el("filter", { id:"fogBlur", x:"-50%", y:"-50%", width:"200%", height:"200%" });
+  filter.appendChild(el("feGaussianBlur", { stdDeviation:"6" }));
+  defs.appendChild(filter);
+  var mask = el("mask", { id:"fogMask" });
+  mask.appendChild(el("rect", { x:0, y:0, width:480, height:320, fill:"white" }));
+  revealShapesG = el("g", { filter:"url(#fogBlur)" });
+  mask.appendChild(revealShapesG);
+  defs.appendChild(mask);
+  mapSvg.appendChild(defs);
+
+  var terrain = el("g", {});
+  EDGES.forEach(function(e){
+    var a = nodeById[e[0]], b = nodeById[e[1]];
+    terrain.appendChild(el("line", { x1:a.x, y1:a.y, x2:b.x, y2:b.y, stroke:"#3a3222", "stroke-width":2, "stroke-dasharray":"3,3", opacity:0.5 }));
+  });
+  NODES.forEach(function(n){
+    terrain.appendChild(el("circle", { cx:n.x, cy:n.y, r:8, fill:"#c98500", opacity:0.9 }));
+    var label = el("text", {
+      x:n.x, y:n.y + 22, "text-anchor":"middle", "font-size":10, "font-weight":700,
+      fill:"#fff7e6", stroke:"#1a1208", "stroke-width":3, "paint-order":"stroke"
+    });
+    label.textContent = n.name;
+    terrain.appendChild(label);
+  });
+  mapSvg.appendChild(terrain);
+
+  buildingsG = el("g", {});
+  mapSvg.appendChild(buildingsG);
+
+  mapSvg.appendChild(el("rect", { x:0, y:0, width:480, height:320, fill:"#0a0906", opacity:0.95, mask:"url(#fogMask)" }));
+
+  markersG = el("g", {});
+  NODES.forEach(function(n){
+    var m = el("circle", { cx:n.x, cy:n.y, r:4, fill:"#f1a34f", opacity:0.7, id:"marker-"+n.id });
+    markersG.appendChild(m);
+  });
+  mapSvg.appendChild(markersG);
+}
+
+function buildingShape(node, tier){
+  var g = el("g", { transform:"translate(" + node.x + "," + node.y + ")" });
+  var colors = ["#f6d9b8","#f0b47e","#eb6834","#c94f1e"];
+  var c = colors[Math.min(tier,4)-1] || colors[0];
+  if (tier >= 1){
+    g.appendChild(el("rect", { x:-13, y:-4, width:26, height:4, fill:c, stroke:"#6b5638", "stroke-width":0.6 }));
+  }
+  if (tier >= 2){
+    g.appendChild(el("rect", { x:-10, y:-18, width:20, height:14, fill:c, stroke:"#6b5638", "stroke-width":0.6 }));
+    g.appendChild(el("polygon", { points:"-12,-18 0,-27 12,-18", fill:"#8b3a1a" }));
+  }
+  if (tier >= 3){
+    g.appendChild(el("rect", { x:-9, y:-38, width:18, height:34, fill:c, stroke:"#6b5638", "stroke-width":0.6 }));
+    for (var r=0;r<3;r++){ for (var col=0;col<2;col++){
+      g.appendChild(el("rect", { x:-6+col*8, y:-34+r*10, width:4, height:5, fill:"#fff7e6", opacity:0.85 }));
+    }}
+  }
+  if (tier >= 4){
+    g.appendChild(el("rect", { x:-7, y:-58, width:14, height:54, fill:c, stroke:"#6b5638", "stroke-width":0.6 }));
+    g.appendChild(el("line", { x1:0, y1:-58, x2:0, y2:-66, stroke:"#6b5638", "stroke-width":1.2 }));
+    for (var r2=0;r2<5;r2++){ for (var col2=0;col2<2;col2++){
+      g.appendChild(el("rect", { x:-5+col2*6, y:-54+r2*10, width:3, height:4, fill:"#fff7e6", opacity:0.85 }));
+    }}
+  }
+  return g;
+}
+
+function renderBuildings(){
+  buildingsG.innerHTML = "";
+  NODES.forEach(function(n){
+    if (n.reveal > 0 && n.tier > 0){
+      buildingsG.appendChild(buildingShape(n, n.tier));
+    }
+  });
+}
+
+function renderFog(){
+  revealShapesG.innerHTML = "";
+  NODES.forEach(function(n){
+    var r = n.reveal * 42;
+    if (r > 0){
+      revealShapesG.appendChild(el("circle", { cx:n.x, cy:n.y, r:r, fill:"black" }));
+    }
+  });
+  EDGES.forEach(function(e){
+    var edge = edgeById[edgeKey(e[0],e[1])];
+    if (edge.reveal > 0){
+      var a = nodeById[e[0]], b = nodeById[e[1]];
+      revealShapesG.appendChild(el("line", {
+        x1:a.x, y1:a.y, x2:b.x, y2:b.y, stroke:"black",
+        "stroke-width": edge.reveal * 20, "stroke-linecap":"round"
+      }));
+    }
+  });
+}
+
+function updateMarkers(){
+  NODES.forEach(function(n){
+    var m = document.getElementById("marker-" + n.id);
+    if (m) m.style.display = n.reveal >= 1 ? "none" : "block";
+  });
+}
+
+function kingdomPercent(){
+  var total = 0;
+  NODES.forEach(function(n){
+    total += (n.reveal * 0.5) + ((n.tier/4) * 0.5);
+  });
+  return Math.round((total / NODES.length) * 100);
+}
+
+function applyMapHit(matchedIds, tier){
+  matchedIds.forEach(function(id){
+    var n = nodeById[id];
+    n.reveal = Math.min(1, n.reveal + 0.34);
+    n.tier = Math.max(n.tier, tier);
+  });
+  for (var i=0;i<matchedIds.length;i++){
+    for (var j=i+1;j<matchedIds.length;j++){
+      var key = edgeKey(matchedIds[i], matchedIds[j]);
+      if (edgeById[key]){
+        edgeById[key].reveal = Math.min(1, edgeById[key].reveal + 0.4);
+      }
+    }
+  }
+  renderFog();
+  renderBuildings();
+  updateMarkers();
+  var pct = kingdomPercent();
+  document.getElementById("map-bar").style.width = pct + "%";
+  document.getElementById("map-pct").textContent = pct + "%";
+  document.getElementById("hud-kingdom").textContent = pct + "%";
+  if (pct >= 100 && !state.won){
+    state.won = true;
+    document.getElementById("victory-overlay").classList.add("show");
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * 7. Quadrant chart rendering
+ * ------------------------------------------------------------------- */
+var quadSvg = document.getElementById("quad-svg");
+var QW = 420, QH = 300, PAD = { l:40, r:16, t:16, b:34 };
+var seqRamp = ["#cde2fb","#9ec5f4","#6da7ec","#3987e5","#256abf","#184f95","#0d366b"];
+
+function initQuad(){
+  quadSvg.innerHTML = "";
+  quadSvg.appendChild(el("rect", { x:0, y:0, width:QW, height:QH, fill:"#fcfcfb" }));
+  var plotW = QW - PAD.l - PAD.r, plotH = QH - PAD.t - PAD.b;
+  [0.25,0.5,0.75].forEach(function(f){
+    quadSvg.appendChild(el("line", { x1:PAD.l+plotW*f, y1:PAD.t, x2:PAD.l+plotW*f, y2:QH-PAD.b, stroke:"#e1e0d9", "stroke-width":1 }));
+    quadSvg.appendChild(el("line", { x1:PAD.l, y1:PAD.t+plotH*f, x2:QW-PAD.r, y2:PAD.t+plotH*f, stroke:"#e1e0d9", "stroke-width":1 }));
+  });
+  quadSvg.appendChild(el("line", { x1:PAD.l, y1:PAD.t, x2:PAD.l, y2:QH-PAD.b, stroke:"#c3c2b7", "stroke-width":1.2 }));
+  quadSvg.appendChild(el("line", { x1:PAD.l, y1:QH-PAD.b, x2:QW-PAD.r, y2:QH-PAD.b, stroke:"#c3c2b7", "stroke-width":1.2 }));
+  var xLabel = el("text", { x:PAD.l+plotW/2, y:QH-6, "text-anchor":"middle", "font-size":10, fill:"#898781" });
+  xLabel.textContent = "提問廣度（單一核心 → 涉及多概念）";
+  quadSvg.appendChild(xLabel);
+  var yLabel = el("text", { x:12, y:PAD.t+plotH/2, "text-anchor":"middle", "font-size":10, fill:"#898781", transform:"rotate(-90 12," + (PAD.t+plotH/2) + ")" });
+  yLabel.textContent = "提問深度（基礎 → 深入評估）";
+  quadSvg.appendChild(yLabel);
+
+  var linesG = el("g", { id:"quad-lines" });
+  var ptsG = el("g", { id:"quad-points" });
+  quadSvg.appendChild(linesG);
+  quadSvg.appendChild(ptsG);
+}
+
+function quadXY(xPct, yPct){
+  var plotW = QW - PAD.l - PAD.r, plotH = QH - PAD.t - PAD.b;
+  var x = PAD.l + (xPct/100) * plotW;
+  var y = (QH - PAD.b) - (yPct/100) * plotH;
+  return { x:x, y:y };
+}
+
+function jaccard(a, b){
+  if (a.length === 0 || b.length === 0) return 0;
+  var setA = {}; a.forEach(function(k){ setA[k]=1; });
+  var inter = 0; b.forEach(function(k){ if (setA[k]) inter++; });
+  var union = {}; a.concat(b).forEach(function(k){ union[k]=1; });
+  return inter / Object.keys(union).length;
+}
+
+var tooltip = document.getElementById("tooltip");
+function showTooltip(evt, html){
+  tooltip.innerHTML = html;
+  tooltip.style.display = "block";
+  tooltip.style.left = (evt.clientX + 14) + "px";
+  tooltip.style.top = (evt.clientY + 14) + "px";
+}
+function hideTooltip(){ tooltip.style.display = "none"; }
+
+function resolveCollision(pos, seedKey){
+  var minGap = 15;
+  for (var iter=0; iter<20; iter++){
+    var nearest = null, nearestD = Infinity;
+    state.points.forEach(function(p){
+      var dx = pos.x-p.x, dy = pos.y-p.y, d = Math.sqrt(dx*dx+dy*dy);
+      if (d < minGap && d < nearestD){ nearestD = d; nearest = p; }
+    });
+    if (!nearest) break;
+    var dx2 = pos.x-nearest.x, dy2 = pos.y-nearest.y, d2 = Math.sqrt(dx2*dx2+dy2*dy2);
+    var angle, push;
+    if (d2 < 0.01){
+      angle = hashStr(seedKey, "angle"+iter) * Math.PI * 2;
+      push = minGap;
+    } else {
+      angle = Math.atan2(dy2, dx2);
+      push = (minGap - d2) + 2;
+    }
+    pos = { x: pos.x + Math.cos(angle)*push, y: pos.y + Math.sin(angle)*push };
+    pos.x = Math.max(PAD.l+8, Math.min(QW-PAD.r-8, pos.x));
+    pos.y = Math.max(PAD.t+8, Math.min(QH-PAD.b-8, pos.y));
+  }
+  return pos;
+}
+
+function plotQuestion(text, result){
+  var key = normalize(text);
+  var breadthBase = result.matched.length === 0 ? 12 : result.matched.length === 1 ? 30 : result.matched.length === 2 ? 58 : 84;
+  var depthBase = [0,18,42,66,90][result.tier];
+  var xPct = Math.max(4, Math.min(96, breadthBase + (hashStr(key,"x")-0.5)*16));
+  var yPct = Math.max(4, Math.min(96, depthBase + (hashStr(key,"y")-0.5)*14));
+
+  var existing = state.pointsByKey[key];
+  if (existing){
+    existing.repeat++;
+    existing.numbers.push(state.questionCount);
+  } else {
+    var pos = resolveCollision(quadXY(xPct, yPct), key);
+    existing = {
+      n: state.questionCount, numbers:[state.questionCount], x:pos.x, y:pos.y,
+      tier: result.tier, matched: result.matched, text: text, repeat: 1, order: state.points.length
+    };
+    state.points.push(existing);
+    state.pointsByKey[key] = existing;
+  }
+  renderQuadPoints();
+  return existing;
+}
+
+function renderQuadPoints(){
+  var linesG = document.getElementById("quad-lines");
+  var ptsG = document.getElementById("quad-points");
+  linesG.innerHTML = "";
+  ptsG.innerHTML = "";
+  var showNumbers = document.getElementById("toggle-numbers").checked;
+  var total = state.points.length;
+
+  for (var i=1;i<total;i++){
+    var prev = state.points[i-1], cur = state.points[i];
+    var sim = jaccard(prev.matched, cur.matched);
+    if (sim > 0 && (prev.x !== cur.x || prev.y !== cur.y)){
+      linesG.appendChild(el("line", {
+        x1:prev.x, y1:prev.y, x2:cur.x, y2:cur.y,
+        stroke:"#8b5a2b", "stroke-width": (1 + sim*5).toFixed(1),
+        opacity: (0.25 + sim*0.5).toFixed(2), "stroke-linecap":"round"
+      }));
+    }
+  }
+
+  state.points.forEach(function(p, idx){
+    var colorIdx = total <= 1 ? seqRamp.length-1 : Math.round((idx/(total-1)) * (seqRamp.length-1));
+    var fill = seqRamp[colorIdx];
+    var strokeW = Math.min(1 + (p.repeat-1)*1.5, 8);
+    var g = el("g", {});
+    var circle = el("circle", {
+      cx:p.x, cy:p.y, r:9, fill:fill, stroke:"#0b0b0b", "stroke-width":strokeW, opacity:0.95
+    });
+    g.appendChild(circle);
+    if (showNumbers){
+      var label = el("text", {
+        x:p.x, y:p.y+3.5, "text-anchor":"middle", "font-size":8.5, "font-weight":700,
+        fill: colorIdx >= 4 ? "#ffffff" : "#0b0b0b"
+      });
+      label.textContent = p.repeat > 1 ? (p.numbers[0] + "×" + p.repeat) : String(p.n);
+      g.appendChild(label);
+    }
+    g.addEventListener("mousemove", function(evt){
+      var nodeNames = p.matched.map(function(id){ return nodeById[id].name; }).join("、") || "（未對應到特定知識點）";
+      showTooltip(evt, "<b>第" + p.numbers.join("/") + "次提問</b><br>" + p.text + "<br>層次：" + p.tier + "/4　關聯知識點：" + nodeNames + (p.repeat>1 ? ("<br>重複提問 " + p.repeat + " 次") : ""));
+    });
+    g.addEventListener("mouseleave", hideTooltip);
+    ptsG.appendChild(g);
+  });
+}
+
+document.getElementById("toggle-numbers").addEventListener("change", renderQuadPoints);
+
+/* ---------------------------------------------------------------------
+ * 8. Main interaction
+ * ------------------------------------------------------------------- */
+function updateHud(){
+  document.getElementById("hud-count").textContent = state.questionCount;
+}
+
+function attachTag(cls, text){
+  var userMsgs = chatLog.querySelectorAll(".msg.user");
+  var lastMsg = userMsgs[userMsgs.length-1];
+  var tagEl = document.createElement("div");
+  tagEl.className = "msg-tag " + cls;
+  tagEl.textContent = text;
+  lastMsg.appendChild(tagEl);
+}
+
+function handleSubmit(text){
+  addMessage("user", text);
+  var result = classify(text);
+  if (result.isQuestion){
+    state.questionCount++;
+    if (result.matched.length > 0){
+      state.onTopicCount++;
+      result.matched.forEach(function(id){ state.touchedNodes[id] = true; });
+    }
+    state.tierSum += result.tier;
+    var pt = plotQuestion(text, result);
+    applyMapHit(result.matched, result.tier);
+    attachTag("on", pt.repeat > 1
+      ? ("已記錄：第" + state.questionCount + "次提問（此題重複第" + pt.repeat + "次）")
+      : ("已記錄：第" + state.questionCount + "次提問"));
+  } else {
+    attachTag("off", "這是一句回覆，不計入提問分析");
+  }
+  updateHud();
+  setTimeout(function(){
+    addMessage("npc", npcReply(result));
+  }, 260);
+}
+
+document.getElementById("chat-form").addEventListener("submit", function(evt){
+  evt.preventDefault();
+  var input = document.getElementById("chat-input");
+  var text = input.value;
+  if (!text.trim()) return;
+  input.value = "";
+  handleSubmit(text);
+});
+
+/* ---------------------------------------------------------------------
+ * 9. Report / export
+ * ------------------------------------------------------------------- */
+function computeReport(){
+  var qc = state.questionCount;
+  var relevance = qc > 0 ? Math.round((state.onTopicCount/qc)*100) : 0;
+  var depth = qc > 0 ? Math.round((state.tierSum/qc)/4*100) : 0;
+  var breadth = Math.round((Object.keys(state.touchedNodes).length / NODES.length) * 100);
+  var kingdom = kingdomPercent();
+  return { qc:qc, relevance:relevance, depth:depth, breadth:breadth, kingdom:kingdom };
+}
+
+function openReport(){
+  var r = computeReport();
+  document.getElementById("r-count").textContent = r.qc;
+  document.getElementById("r-relevance").textContent = r.relevance + "%";
+  document.getElementById("r-depth").textContent = r.depth + "%";
+  document.getElementById("r-breadth").textContent = r.breadth + "%";
+  document.getElementById("r-kingdom").textContent = r.kingdom + "%";
+  document.getElementById("report-title").textContent = state.won ? "王國建立完成！你的提問品質報告" : "你的提問品質報告";
+  document.getElementById("dl-report-btn").disabled = true;
+  document.getElementById("report-preview").style.display = "none";
+  document.getElementById("report-overlay").classList.add("show");
+}
+
+window.endGame = function(){ openReport(); };
+window.closeReport = function(){ document.getElementById("report-overlay").classList.remove("show"); };
+window.closeVictory = function(){ document.getElementById("victory-overlay").classList.remove("show"); };
+
+document.getElementById("end-btn").addEventListener("click", function(){ openReport(); });
+
+function svgToPngDataUrl(svgEl, scale){
+  return new Promise(function(resolve){
+    var clone = svgEl.cloneNode(true);
+    clone.setAttribute("xmlns", svgNS);
+    var vb = svgEl.viewBox.baseVal;
+    var w = vb.width, h = vb.height;
+    var xml = new XMLSerializer().serializeToString(clone);
+    var svgBlob = new Blob([xml], { type:"image/svg+xml;charset=utf-8" });
+    var url = URL.createObjectURL(svgBlob);
+    var img = new Image();
+    img.onload = function(){
+      var canvas = document.createElement("canvas");
+      canvas.width = w*scale; canvas.height = h*scale;
+      var ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#fcfcfb";
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    img.src = url;
+  });
+}
+
+function wrapText(ctx, text, x, y, maxWidth, lineHeight){
+  var chars = text.split("");
+  var line = "";
+  var lines = [];
+  chars.forEach(function(ch){
+    var test = line + ch;
+    if (ctx.measureText(test).width > maxWidth && line){
+      lines.push(line);
+      line = ch;
+    } else {
+      line = test;
+    }
+  });
+  if (line) lines.push(line);
+  lines.forEach(function(l, i){ ctx.fillText(l, x, y + i*lineHeight); });
+}
+
+function triggerDownload(dataUrl, filename){
+  var a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+document.getElementById("dl-quad-btn").addEventListener("click", function(){
+  svgToPngDataUrl(quadSvg, 2).then(function(url){ triggerDownload(url, "ai-quest-quadrant.png"); });
+});
+document.getElementById("dl-map-btn").addEventListener("click", function(){
+  svgToPngDataUrl(mapSvg, 2).then(function(url){ triggerDownload(url, "ai-quest-map.png"); });
+});
+
+document.getElementById("gen-report-btn").addEventListener("click", function(){
+  var r = computeReport();
+  Promise.all([svgToPngDataUrl(mapSvg,2), svgToPngDataUrl(quadSvg,2)]).then(function(urls){
+    var mapImg = new Image(), quadImg = new Image();
+    var loaded = 0;
+    function done(){
+      loaded++;
+      if (loaded < 2) return;
+      var canvas = document.getElementById("report-canvas");
+      var ctx = canvas.getContext("2d");
+      var W = canvas.width;
+      ctx.fillStyle = "#f5e8c7";
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle = "#4a2c0f";
+      ctx.font = "900 40px 'Noto Sans TC', sans-serif";
+      ctx.fillText("AI知識王國 · 提問品質報告", 40, 60);
+      ctx.font = "16px 'Noto Sans TC', sans-serif";
+      ctx.fillStyle = "#6b5638";
+      ctx.fillText(new Date().toLocaleString("zh-TW") + (state.won ? "　｜　王國建立完成！" : ""), 40, 90);
+
+      var stats = [
+        ["提問次數", r.qc + " 次"],
+        ["與主題關聯性比例", r.relevance + "%"],
+        ["提問層次高低", r.depth + "%"],
+        ["提問廣度", r.breadth + "%"],
+        ["王國建立程度", r.kingdom + "%"]
+      ];
+      var statsTop = 115, cardW = (W - 80 - 4*16)/5, cardH = 110;
+      stats.forEach(function(s, i){
+        var cx = 40 + i*(cardW+16);
+        ctx.fillStyle = "#fffaf0";
+        ctx.strokeStyle = "#d3b683";
+        ctx.lineWidth = 2;
+        ctx.fillRect(cx, statsTop, cardW, cardH);
+        ctx.strokeRect(cx, statsTop, cardW, cardH);
+        ctx.fillStyle = "#6b5638";
+        ctx.font = "14px 'Noto Sans TC', sans-serif";
+        wrapText(ctx, s[0], cx+12, statsTop+26, cardW-24, 18);
+        ctx.fillStyle = "#4a2c0f";
+        ctx.font = "900 26px 'Noto Sans TC', sans-serif";
+        ctx.fillText(s[1], cx+12, statsTop+cardH-16);
+      });
+
+      var mapTop = statsTop + cardH + 30;
+      var mapW = W - 80, mapH = mapW * (320/480);
+      ctx.drawImage(mapImg, 40, mapTop, mapW, mapH);
+
+      var quadTop = mapTop + mapH + 30;
+      var quadW = W - 80, quadH = quadW * (300/420);
+      ctx.drawImage(quadImg, 40, quadTop, quadW, quadH);
+
+      document.getElementById("report-preview").src = canvas.toDataURL("image/png");
+      document.getElementById("report-preview").style.display = "block";
+      document.getElementById("dl-report-btn").disabled = false;
+      document.getElementById("dl-report-btn").onclick = function(){
+        triggerDownload(canvas.toDataURL("image/png"), "ai-quest-report.png");
+      };
+    }
+    mapImg.onload = done; quadImg.onload = done;
+    mapImg.src = urls[0]; quadImg.src = urls[1];
+  });
+});
+
+/* ---------------------------------------------------------------------
+ * 10. Init / restart
+ * ------------------------------------------------------------------- */
+function resetState(){
+  NODES.forEach(function(n){ n.reveal = 0; n.tier = 0; });
+  Object.keys(edgeById).forEach(function(k){ edgeById[k].reveal = 0; });
+  state.questionCount = 0;
+  state.onTopicCount = 0;
+  state.tierSum = 0;
+  state.touchedNodes = {};
+  state.points = [];
+  state.pointsByKey = {};
+  state.won = false;
+  chatLog.innerHTML = "";
+  updateHud();
+  document.getElementById("hud-kingdom").textContent = "0%";
+  document.getElementById("map-bar").style.width = "0%";
+  document.getElementById("map-pct").textContent = "0%";
+  initMap();
+  initQuad();
+  addMessage("npc", "哈囉！我是AI夥伴「小知」，歡迎來到「AI知識王國」。這片土地被迷霧覆蓋，藏著關於AI基礎技術（監督式學習、非監督式學習、強化學習等）與AI素養的知識。你可以直接輸入問題問我，我會盡力回答；你每一次提問，也會同時在右邊的地圖與圖表上留下足跡。準備好就問我第一個問題吧！");
+}
+
+document.getElementById("restart-btn").addEventListener("click", function(){
+  if (confirm("確定要重新開始嗎？目前的提問紀錄與地圖進度都會被清空。")) resetState();
+});
+
+resetState();
+
+})();
+</script>
+</body>
+</html>
