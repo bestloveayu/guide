@@ -135,6 +135,13 @@ export function materials() {
     hull: new THREE.MeshPhysicalMaterial({ color: '#f2f4f7', roughness: 0.32, clearcoat: 0.7, clearcoatRoughness: 0.2, side: THREE.DoubleSide }),
     curtain: new THREE.MeshPhysicalMaterial({ color: '#1d2a48', roughness: 0.95, sheen: 0.6, sheenColor: new THREE.Color('#6d84b8'), side: THREE.DoubleSide }),
     rubber: new THREE.MeshStandardMaterial({ color: '#1e2026', roughness: 0.9 }),
+    belt: new THREE.MeshStandardMaterial({ color: '#4a4f58', roughness: 0.85, map: rep(T.fabricMap, 20) }),
+    chrome: new THREE.MeshStandardMaterial({ color: '#dfe3e8', metalness: 1, roughness: 0.12 }),
+    porcelain: new THREE.MeshPhysicalMaterial({ color: '#f4f5f7', roughness: 0.15, clearcoat: 1, clearcoatRoughness: 0.08 }),
+    mirror: new THREE.MeshStandardMaterial({ color: '#c8d0da', metalness: 1, roughness: 0.03 }),
+    lavWall: new THREE.MeshStandardMaterial({ color: '#e3e0d8', roughness: 0.45, side: THREE.DoubleSide }),
+    cockpitGrey: new THREE.MeshStandardMaterial({ color: '#4b5160', roughness: 0.7 }),
+    cockpitDark: new THREE.MeshStandardMaterial({ color: '#2b2f37', roughness: 0.6 }),
   };
   return MATS;
 }
@@ -168,7 +175,7 @@ function recline(g, pivotX, pivotY, ang) { g.translate(-pivotX, -pivotY, 0); g.r
 // 回傳 { geometry（含材質群組）, materials }，原點在地板、面向 -x
 export function seatAsset(cls, w, d, opts = {}) {
   const m = materials();
-  const groups = { fabric: [], head: [], shell: [], tray: [], metal: [], screen: [], dark: [] };
+  const groups = { fabric: [], head: [], shell: [], tray: [], metal: [], screen: [], dark: [], belt: [] };
   const bw = w * 0.9;
   const backX = d * 0.36; // 椅背前緣 x
   const ang = cls === 'J' ? 0.2 : 0.16;
@@ -221,8 +228,14 @@ export function seatAsset(cls, w, d, opts = {}) {
     }
     for (const lx of [-d * 0.2, d * 0.15]) { const rail = new THREE.CylinderGeometry(0.018, 0.018, w * 1.0, 10); rail.rotateX(Math.PI / 2); rail.translate(lx, 0.35, 0); groups.metal.push(rail); }
     const bag = new RoundedBoxGeometry(0.36, 0.05, w * 0.6, 2, 0.02); bag.translate(-0.02, 0.33, 0); groups.dark.push(bag); // 救生衣袋
+    // 安全帶：兩段織帶平放在椅墊上，中間金屬扣
+    for (const side of [-1, 1]) {
+      const strap = new RoundedBoxGeometry(0.045, 0.008, w * 0.36, 1, 0.003); strap.rotateY(side * 0.12); strap.translate(0.02, 0.522, side * w * 0.2); groups.belt.push(strap);
+      const anchor = new RoundedBoxGeometry(0.05, 0.05, 0.012, 1, 0.004); anchor.translate(0.12, 0.5, side * (w * 0.43)); groups.metal.push(anchor);
+    }
+    const buckle = new RoundedBoxGeometry(0.06, 0.012, 0.055, 2, 0.006); buckle.translate(0.02, 0.528, 0); groups.metal.push(buckle);
   }
-  const order = [['fabric', m.fabric[cls] || m.fabric.Y], ['head', m.headrest], ['shell', m.shell], ['tray', m.tray], ['metal', m.metal], ['screen', m.screen], ['dark', m.shellDark]];
+  const order = [['fabric', m.fabric[cls] || m.fabric.Y], ['head', m.headrest], ['shell', m.shell], ['tray', m.tray], ['metal', m.metal], ['screen', m.screen], ['dark', m.shellDark], ['belt', m.belt]];
   const geos = [], mats = [];
   order.forEach(([k, mat]) => { if (groups[k].length) { geos.push(mergeGeometries(groups[k].map(keep), false)); mats.push(mat); } });
   return { geometry: mergeGeometries(geos, true), materials: mats };
@@ -400,6 +413,9 @@ export function passengerGeometry(p) {
     body.push(colored(new RoundedBoxGeometry(0.24, 0.07, 0.095, 2, 0.03), '#1f2026', M(-0.34, 0.04, z)));
   }
   body.push(colored(sph(0.17, 18, 12), pants, M(0.08, 0.58, 0, 0, 0, 0, 0.85, 0.55, 1.15)));
+  // 繫上的安全帶（橫過腰部）與金屬扣
+  body.push(colored(new RoundedBoxGeometry(0.05, 0.016, 0.42, 1, 0.006), '#454a53', M(0.0, 0.66, 0, 0, 0, -0.35)));
+  body.push(colored(new RoundedBoxGeometry(0.03, 0.05, 0.07, 2, 0.008), '#c9ccd1', M(-0.015, 0.665, 0, 0, 0, -0.35)));
   // 軀幹：肩寬約 0.42 m，靠在椅背上
   body.push(colored(torsoLathe([[0.0, 0], [0.14, 0.02], [0.135, 0.16], [0.16, 0.34], [0.175, 0.44], [0.15, 0.5], [0.07, 0.545], [0, 0.55]], 24), shirt, M(0.13, 0.6, 0, 0, 0, -0.16, 0.66, 1, 1.22)));
   body.push(colored(new THREE.TorusGeometry(0.055, 0.02, 8, 18), shadeHex(shirt, 1.12), M(0.16, 1.14, 0, Math.PI / 2, 0, 0)));
@@ -509,6 +525,26 @@ export function makeCrew(u) {
     const band = new THREE.Mesh(new THREE.CylinderGeometry(0.114, 0.114, 0.022, 28), cloth(u.scarf)); band.position.set(0.02, 1.885, 0); band.rotation.z = -0.12; g.add(band);
     const badge = new THREE.Mesh(sph(0.016, 10, 8), gold); badge.position.set(0.125, 1.905, 0); badge.scale.set(0.4, 1, 1.4); g.add(badge);
   }
+  // 組員座椅的四點式安全帶（坐下並繫好時顯示）
+  const harness = new THREE.Group();
+  const beltM = mat('#3d424b', { roughness: 0.85 }), buckM = mat('#d5d9de', { metalness: 0.9, roughness: 0.2 });
+  for (const s2 of [-1, 1]) {
+    const sh = new THREE.Mesh(new RoundedBoxGeometry(0.012, 0.42, 0.045, 1, 0.004), beltM); sh.position.set(0.16, 1.28, s2 * 0.075); sh.rotation.x = s2 * 0.18; harness.add(sh);
+  }
+  const lap = new THREE.Mesh(new RoundedBoxGeometry(0.05, 0.016, 0.4, 1, 0.006), beltM); lap.position.set(0.12, 0.98, 0); harness.add(lap);
+  const rot = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.015, 20), buckM); rot.rotation.z = Math.PI / 2; rot.position.set(0.17, 1.04, 0); harness.add(rot);
+  harness.visible = false; g.add(harness);
+  g.userData.setHarness = (on) => { harness.visible = on; };
+  if (u.pilot) {
+    // 耳機與肩章
+    const hs = new THREE.Mesh(new THREE.TorusGeometry(0.118, 0.008, 6, 24, Math.PI), mat('#1e2126')); hs.position.set(-0.01, 1.74, 0); hs.rotation.y = Math.PI / 2; g.add(hs);
+    for (const s2 of [-1, 1]) {
+      const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.03, 18), mat('#1e2126')); cup.rotation.x = Math.PI / 2; cup.position.set(-0.01, 1.735, s2 * 0.095); g.add(cup);
+      const ep = new THREE.Mesh(new RoundedBoxGeometry(0.1, 0.012, 0.06, 1, 0.004), mat(u.jacket)); ep.position.set(0, 1.5, s2 * 0.17); g.add(ep);
+      for (let k = 0; k < (u.stripes || 4); k++) { const st = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.004, 0.06), gold); st.position.set(-0.03 + k * 0.018, 1.507, s2 * 0.17); g.add(st); }
+    }
+    const mic = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.12, 6), mat('#1e2126')); mic.rotation.z = 1.2; mic.position.set(0.06, 1.69, -0.085); g.add(mic);
+  }
   g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   let blend = 0;
   g.userData.animate = (t, moving, seated, dt = 0.016) => {
@@ -521,3 +557,53 @@ export function makeCrew(u) {
   return g;
 }
 function shadeHex(hex, k) { return '#' + new THREE.Color(hex).multiplyScalar(k).getHexString(); }
+
+// ---------- 餐車（不鏽鋼推車、上方放飲料與杯子） ----------
+export function makeCart(accent, airline) {
+  const m = materials();
+  const g = new THREE.Group();
+  const c = document.createElement('canvas'); c.width = 512; c.height = 512;
+  const x = c.getContext('2d');
+  const gr = x.createLinearGradient(0, 0, 512, 0); gr.addColorStop(0, '#b9bec6'); gr.addColorStop(0.5, '#d9dde2'); gr.addColorStop(1, '#b4b9c1');
+  x.fillStyle = gr; x.fillRect(0, 0, 512, 512);
+  x.strokeStyle = 'rgba(70,74,82,0.6)'; x.lineWidth = 4; x.strokeRect(14, 14, 484, 484);
+  x.fillStyle = accent; x.fillRect(14, 60, 484, 26);
+  x.fillStyle = '#ffffff'; x.font = '700 22px system-ui'; x.textAlign = 'center'; x.fillText(airline || '', 256, 81);
+  x.fillStyle = '#7d848f'; x.fillRect(220, 200, 72, 14); x.fillStyle = '#c0392b'; x.fillRect(236, 380, 40, 40);
+  for (let i = 0; i < 6; i++) { x.fillStyle = 'rgba(0,0,0,0.08)'; x.fillRect(30, 120 + i * 60, 452, 2); }
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const bodyM = new THREE.MeshStandardMaterial({ map: tex, metalness: 0.65, roughness: 0.35 });
+  const body = new THREE.Mesh(new RoundedBoxGeometry(0.8, 0.98, 0.3, 3, 0.02), bodyM); body.position.y = 0.55; g.add(body);
+  const lip = new THREE.Mesh(new RoundedBoxGeometry(0.82, 0.03, 0.32, 2, 0.01), m.steel); lip.position.y = 1.055; g.add(lip);
+  for (const sx of [-0.33, 0.33]) for (const sz of [-0.11, 0.11]) {
+    const wh = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.025, 16), m.rubber); wh.rotation.x = Math.PI / 2; wh.position.set(sx, 0.035, sz); g.add(wh);
+  }
+  const brakeR = new THREE.Mesh(new RoundedBoxGeometry(0.06, 0.02, 0.08, 1, 0.006), new THREE.MeshStandardMaterial({ color: '#c0392b' })); brakeR.position.set(0.42, 0.06, 0); g.add(brakeR);
+  const brakeG = new THREE.Mesh(new RoundedBoxGeometry(0.06, 0.02, 0.08, 1, 0.006), new THREE.MeshStandardMaterial({ color: '#2f9e5b' })); brakeG.position.set(-0.42, 0.06, 0); g.add(brakeG);
+  // 上層：咖啡壺、果汁瓶、杯子、啤酒罐
+  const cupM = new THREE.MeshStandardMaterial({ color: '#f4f4f2', roughness: 0.5 });
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.2, 20), m.chrome); pot.position.set(-0.28, 1.17, 0.05); g.add(pot);
+  const potH = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.008, 6, 14, Math.PI), m.shellDark); potH.position.set(-0.28, 1.2, 0.11); potH.rotation.y = Math.PI / 2; g.add(potH);
+  [['#f2a33a', -0.12], ['#e8d27a', -0.02], ['#c43b2f', 0.08]].forEach(([col, px], i) => {
+    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.22, 16), new THREE.MeshPhysicalMaterial({ color: col, roughness: 0.12, clearcoat: 1, transparent: true, opacity: 0.85 })); b.position.set(px, 1.18, -0.07); g.add(b);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.03, 12), m.shellDark); cap.position.set(px, 1.305, -0.07); g.add(cap);
+  });
+  for (let i = 0; i < 3; i++) { const st = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.028, 0.16, 16), cupM); st.position.set(0.12 + i * 0.075, 1.15, 0.07); g.add(st); }
+  for (let i = 0; i < 4; i++) { const can = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.11, 16), new THREE.MeshStandardMaterial({ color: i % 2 ? '#2a6e3f' : '#b8352c', metalness: 0.6, roughness: 0.3 })); can.position.set(0.18 + (i % 2) * 0.07, 1.125, -0.06 - Math.floor(i / 2) * 0.0); g.add(can); }
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+
+// 旅客桌板上的餐點（已送餐的旅客）
+export function makeMealTray(drinkCol) {
+  const m = materials();
+  const g = new THREE.Group();
+  const tray = new THREE.Mesh(new RoundedBoxGeometry(0.3, 0.015, 0.4, 2, 0.006), new THREE.MeshStandardMaterial({ color: '#5a5f68', roughness: 0.5 })); g.add(tray);
+  const box = new THREE.Mesh(new RoundedBoxGeometry(0.16, 0.05, 0.2, 2, 0.01), new THREE.MeshStandardMaterial({ color: '#ece7dc', roughness: 0.4 })); box.position.set(0.03, 0.03, -0.06); g.add(box);
+  const lid = new THREE.Mesh(new RoundedBoxGeometry(0.16, 0.008, 0.2, 1, 0.004), new THREE.MeshStandardMaterial({ color: '#c9cdd3', metalness: 0.7, roughness: 0.3 })); lid.position.set(0.03, 0.058, -0.06); g.add(lid);
+  const bread = new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 10), new THREE.MeshStandardMaterial({ color: '#c99554', roughness: 0.8 })); bread.scale.y = 0.7; bread.position.set(-0.08, 0.03, 0.1); g.add(bread);
+  const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.025, 0.09, 16), new THREE.MeshStandardMaterial({ color: '#f4f4f2' })); cup.position.set(0.09, 0.05, 0.12); g.add(cup);
+  const drink = new THREE.Mesh(new THREE.CylinderGeometry(0.027, 0.027, 0.005, 16), new THREE.MeshStandardMaterial({ color: drinkCol || '#c58a3a' })); drink.position.set(0.09, 0.09, 0.12); g.add(drink);
+  const fork = new THREE.Mesh(new RoundedBoxGeometry(0.012, 0.004, 0.15, 1, 0.002), m.chrome); fork.position.set(-0.11, 0.012, -0.05); g.add(fork);
+  return g;
+}

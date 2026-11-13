@@ -12,7 +12,7 @@ import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUnifo
 RectAreaLightUniformsLib.init();
 import { PAX_TYPES, PRIORITY } from './data.js';
 import { activeSeats, binDoors, roomLayout } from './layout.js';
-import { M, materials, textures, seatAsset, passengerGeometry, PAX_MAT, makeCrew as buildCrew } from './art.js';
+import { M, materials, textures, seatAsset, passengerGeometry, PAX_MAT, makeCrew as buildCrew, makeCart, makeMealTray } from './art.js';
 
 export const makeCrew = buildCrew;
 const P = (x, y, h = 0) => new THREE.Vector3(x, h, -y); // 模擬座標 → three
@@ -279,6 +279,7 @@ export class View3D {
     this.npcMeshes = new Map();
     this.glow = [];
     this.oxyBuilt = new Map();
+    this.cockpitPanel = null;
     const m = materials();
     const L = ac.length, W = ac.width, R = W / 2;
     const uni = prof.uniform;
@@ -591,6 +592,16 @@ export class View3D {
 
     this.player = makeCrew(uni);
     this.cabin.add(this.player);
+    // 餐車
+    this.cart = makeCart(accent, prof.airline);
+    this.cabin.add(this.cart);
+    const gal = ac.fixtures.find((ff) => ff.type === 'galley');
+    if (gal) {
+      let fx = 0, fy = 0;
+      if (Math.abs(gal.y) > 0.3 && gal.d < W * 0.8) fy = gal.y < 0 ? 1 : -1; else fx = gal.x < L / 2 ? 1 : -1;
+      this.cartHome = { x: gal.x + fx * (gal.w / 2 + 0.17), y: gal.y + fy * (gal.d / 2 + 0.17) };
+    }
+    this.trays = new Map();
     this.cabin.traverse((o) => { if (o.isMesh && !(o.material && o.material.isMeshBasicMaterial)) o.receiveShadow = true; });
     this.applyMode();
   }
@@ -625,9 +636,11 @@ export class View3D {
     if (f.type === 'galley' || f.type === 'lav' || f.type === 'closet') {
       const h = 2.0;
       const mat = this.clipped(f.type === 'galley' ? m.steel : f.type === 'lav' ? m.bin : m.wood);
-      const body = new THREE.Mesh(new RoundedBoxGeometry(f.w, h, f.d, 3, 0.04), mat);
-      body.position.copy(pos); body.position.y = h / 2; body.castShadow = true;
-      this.cabin.add(body);
+      if (f.type !== 'lav') {
+        const body = new THREE.Mesh(new RoundedBoxGeometry(f.w, h, f.d, 3, 0.04), mat);
+        body.position.copy(pos); body.position.y = h / 2; body.castShadow = true;
+        this.cabin.add(body);
+      }
       if (f.type === 'lav') this.addLavDoor(f, pos, face, lookY, frontW, depth, h, accent);
       else addFront(frontW * 0.94, h * 0.94, facadeTexture(f.type, f.label, accent), f.type === 'galley' ? m.steel : m.bin);
       if (f.type === 'galley') {
@@ -668,29 +681,59 @@ export class View3D {
     if (f.label && f.type !== 'jumpseat') this.cabin.add(this.label(f.label, P(f.x, f.y, f.type === 'door' ? 2.2 : 2.35), 0.7));
   }
 
-  // ---- 洗手間：可開關的門 + 內部（馬桶、洗手台、鏡子） ----
+  // ---- 洗手間：中空隔間（牆、天花、地板）+ 馬桶、洗手台、鏡子、照明 + 可開關的門 ----
   addLavDoor(f, pos, face, lookY, frontW, depth, h, accent) {
     const m = materials();
-    const w = frontW * 0.9, dh = h * 0.95;
-    const inTex = canvasTex(256, 512, (g) => {
-      g.fillStyle = '#d9dde3'; g.fillRect(0, 0, 256, 512);
-      g.fillStyle = '#b8c4d2'; g.fillRect(30, 60, 196, 120); g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(40, 70, 60, 100);
-      g.fillStyle = '#eef0f3'; g.beginPath(); g.roundRect(40, 220, 176, 50, 10); g.fill(); g.fillStyle = '#9aa3ae'; g.fillRect(120, 200, 16, 24);
-      g.fillStyle = '#f5f6f8'; g.beginPath(); g.ellipse(128, 410, 62, 40, 0, 0, 7); g.fill(); g.fillStyle = '#e6e8ec'; g.fillRect(84, 300, 88, 100);
-      g.fillStyle = 'rgba(0,0,0,0.12)'; g.fillRect(0, 480, 256, 32);
-    });
-    const inside = new THREE.Mesh(new THREE.PlaneGeometry(w, dh), this.clipped(new THREE.MeshStandardMaterial({ map: inTex, roughness: 0.5 })));
-    inside.position.copy(pos).addScaledVector(face, depth / 2 + 0.003); inside.position.y = dh / 2 + 0.03; inside.rotation.y = lookY;
-    this.cabin.add(inside);
-    const tangent = new THREE.Vector3(face.z, 0, -face.x);
+    const g = new THREE.Group(); // 局部座標：+z 朝門、x 沿門寬
+    g.position.copy(pos); g.rotation.y = lookY;
+    const W = frontW, D = depth, T = 0.035;
+    const shell = this.clipped(m.bin), inner = this.clipped(m.lavWall);
+    const add = (geo, mat, x, y, z, ry = 0) => { const o = new THREE.Mesh(geo, mat); o.position.set(x, y, z); o.rotation.y = ry; o.castShadow = true; o.receiveShadow = true; g.add(o); return o; };
+    // 外殼與內牆
+    add(new THREE.BoxGeometry(W, h, T), shell, 0, h / 2, -D / 2 + T / 2);
+    add(new THREE.BoxGeometry(T, h, D), shell, -W / 2 + T / 2, h / 2, 0);
+    add(new THREE.BoxGeometry(T, h, D), shell, W / 2 - T / 2, h / 2, 0);
+    add(new THREE.BoxGeometry(W, T, D), shell, 0, h - T / 2, 0);
+    const dw = W * 0.86;
+    add(new THREE.BoxGeometry((W - dw) / 2, h, T), shell, -W / 2 + (W - dw) / 4, h / 2, D / 2 - T / 2);
+    add(new THREE.BoxGeometry((W - dw) / 2, h, T), shell, W / 2 - (W - dw) / 4, h / 2, D / 2 - T / 2);
+    add(new THREE.BoxGeometry(dw, h - 1.95, T), shell, 0, 1.95 + (h - 1.95) / 2, D / 2 - T / 2);
+    add(new THREE.PlaneGeometry(W - 2 * T, h - T), inner, 0, (h - T) / 2, -D / 2 + T + 0.001);
+    add(new THREE.PlaneGeometry(D - 2 * T, h - T), inner, -W / 2 + T + 0.001, (h - T) / 2, 0, Math.PI / 2);
+    add(new THREE.PlaneGeometry(D - 2 * T, h - T), inner, W / 2 - T - 0.001, (h - T) / 2, 0, -Math.PI / 2);
+    const floor = add(new THREE.PlaneGeometry(W - 2 * T, D - 2 * T), this.clipped(new THREE.MeshStandardMaterial({ color: '#7b8088', roughness: 0.6 })), 0, 0.01, 0); floor.rotation.x = -Math.PI / 2;
+    // 馬桶（左後角）
+    const tx = -W / 2 + 0.26, tz = -D / 2 + 0.3;
+    add(new RoundedBoxGeometry(0.34, 0.36, 0.42, 4, 0.08), m.porcelain, tx, 0.18, tz);
+    const rim = add(new THREE.TorusGeometry(0.15, 0.028, 12, 32), m.porcelain, tx, 0.39, tz + 0.03); rim.rotation.x = Math.PI / 2; rim.scale.set(1, 1.25, 1);
+    const water = add(new THREE.CircleGeometry(0.12, 24), new THREE.MeshStandardMaterial({ color: '#9fb6c9', roughness: 0.05, metalness: 0.2 }), tx, 0.33, tz + 0.03); water.rotation.x = -Math.PI / 2; water.scale.set(1, 1.25, 1);
+    const lid = add(new RoundedBoxGeometry(0.32, 0.4, 0.03, 3, 0.012), m.porcelain, tx, 0.6, -D / 2 + T + 0.04); lid.rotation.x = -0.12;
+    add(new RoundedBoxGeometry(0.06, 0.06, 0.02, 2, 0.01), m.chrome, tx + 0.22, 1.0, -D / 2 + T + 0.012);
+    // 洗手台（右側）與水龍頭
+    const sx = W / 2 - 0.2, sz = -D / 2 + 0.36;
+    add(new RoundedBoxGeometry(0.36, 0.86, 0.5, 3, 0.03), this.clipped(m.lavWall), sx, 0.43, sz);
+    add(new RoundedBoxGeometry(0.38, 0.03, 0.52, 3, 0.012), m.porcelain, sx, 0.875, sz);
+    const basin = add(new THREE.SphereGeometry(0.11, 24, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), m.porcelain, sx, 0.89, sz + 0.02); basin.scale.set(1, 0.55, 1.2);
+    const tap = add(new THREE.CylinderGeometry(0.012, 0.014, 0.12, 12), m.chrome, sx + 0.12, 0.95, sz + 0.02);
+    const spout = add(new THREE.CylinderGeometry(0.009, 0.009, 0.09, 10), m.chrome, sx + 0.08, 1.0, sz + 0.02); spout.rotation.z = Math.PI / 2;
+    // 鏡子、紙巾盒、扶手、照明
+    add(new THREE.PlaneGeometry(D * 0.7, 0.5), m.mirror, W / 2 - T - 0.003, 1.35, sz, -Math.PI / 2);
+    add(new RoundedBoxGeometry(0.04, 0.24, 0.3, 2, 0.01), m.chrome, -W / 2 + T + 0.02, 1.1, tz + 0.3);
+    const grab = add(new THREE.CylinderGeometry(0.012, 0.012, 0.35, 10), m.chrome, -W / 2 + T + 0.04, 0.95, tz + 0.05); grab.rotation.x = Math.PI / 2;
+    const lightP = add(new THREE.PlaneGeometry(W * 0.6, 0.12), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.8, 1.7, 1.5), toneMapped: false }), 0, h - T - 0.002, 0); lightP.rotation.x = Math.PI / 2;
+    const smoke = add(new THREE.CylinderGeometry(0.04, 0.04, 0.02, 16), new THREE.MeshStandardMaterial({ color: '#f2f2f0' }), 0.15, h - T - 0.012, 0.1);
+    const pl = null;
+    this.cabin.add(g);
+    // 門
     const pivot = new THREE.Group();
-    pivot.position.copy(pos).addScaledVector(face, depth / 2 + 0.012).addScaledVector(tangent, -w / 2);
+    const tangent = new THREE.Vector3(face.z, 0, -face.x);
+    pivot.position.copy(pos).addScaledVector(face, D / 2 + 0.004).addScaledVector(tangent, -dw / 2);
     pivot.rotation.y = lookY;
     const dmat = this.clipped(m.bin); dmat.map = facadeTexture('lav', f.label, accent); dmat.color = new THREE.Color('#ffffff');
-    const door = new THREE.Mesh(new RoundedBoxGeometry(w, dh, 0.025, 2, 0.008), dmat);
-    door.position.set(w / 2, dh / 2 + 0.03, 0); door.userData.propId = f.id; door.castShadow = true;
+    const door = new THREE.Mesh(new RoundedBoxGeometry(dw, 1.93, 0.03, 2, 0.008), dmat);
+    door.position.set(dw / 2, 0.98, 0); door.userData.propId = f.id; door.castShadow = true;
     pivot.add(door); this.cabin.add(pivot); this.propMeshes.push(door);
-    this.pivots.set(f.id, { pivot, axis: 'y', base: lookY, dir: -1, max: 1.7, cur: 0 });
+    this.pivots.set(f.id, { pivot, axis: 'y', base: lookY, dir: -1, max: 1.7, cur: 0, light: pl });
   }
 
   // ---- 組員休息室：牆、門、上下舖 ----
@@ -728,45 +771,168 @@ export class View3D {
     const post = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.9, 0.05), frame); post.position.set(b.x1 - 0.03, 0.95, -(r.bunk.outer + r.bunk.sgn * bdp)); this.cabin.add(post);
     const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.03, 0.05), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.3, 0.9), toneMapped: false }));
     lamp.position.set(bx, 1.9, -(r.inside.y0 + r.inside.y1) / 2); this.cabin.add(lamp);
-    const rl = new THREE.PointLight(0xffd9a8, 1.2, 3.5, 2); rl.position.set(bx, 1.7, -(r.inside.y0 + r.inside.y1) / 2); this.cabin.add(rl);
   }
 
-  // ---- 駕駛艙：隔板與駕駛艙門、駕駛座與兩位駕駛員 ----
+  // ---- 駕駛艙：擋風玻璃、儀表板（動態飛航顯示器）、遮光罩、頂板、中央操縱台、側桿/駕駛盤、駕駛座、兩位駕駛員 ----
   addCockpit(f, ac, accent) {
     const m = materials();
     const r = roomLayout(f, ac);
-    const H = 2.25, bx = f.x + f.w / 2;
+    const W = ac.width, H = 2.25, bx = f.x + f.w / 2, x0 = f.x - f.w / 2;
+    const airbus = (ac.templateId || '').startsWith('a3');
+    const grey = this.clipped(m.cockpitGrey), dark = this.clipped(m.cockpitDark);
+    const add = (geo, mat, x, y, z, rx = 0, ry = 0, rz = 0) => { const o = new THREE.Mesh(geo, mat); o.position.set(x, y, z); o.rotation.set(rx, ry, rz); o.castShadow = true; o.receiveShadow = true; this.cabin.add(o); return o; };
+    // 後隔板（中央門）
     const wallMat = this.clipped(m.shell);
-    r.walls.forEach((q) => { const mm = new THREE.Mesh(new THREE.BoxGeometry(0.1, H, q.y1 - q.y0), wallMat); mm.position.set(bx - 0.05, H / 2, -(q.y0 + q.y1) / 2); this.cabin.add(mm); });
-    const header = new THREE.Mesh(new THREE.BoxGeometry(0.1, H - 2.0, 0.84), wallMat); header.position.set(bx - 0.05, 2.0 + (H - 2.0) / 2, 0); this.cabin.add(header);
+    r.walls.forEach((q) => add(new THREE.BoxGeometry(0.1, H, q.y1 - q.y0), wallMat, bx - 0.05, H / 2, -(q.y0 + q.y1) / 2));
+    add(new THREE.BoxGeometry(0.1, H - 2.0, 0.84), wallMat, bx - 0.05, 2.0 + (H - 2.0) / 2, 0);
+    // 隔板內側：斷路器面板
+    const cbTex = canvasTex(512, 256, (g) => { g.fillStyle = '#3a404b'; g.fillRect(0, 0, 512, 256); for (let i = 0; i < 18; i++) for (let j = 0; j < 9; j++) { g.fillStyle = '#16191e'; g.beginPath(); g.arc(20 + i * 27, 22 + j * 26, 6, 0, 7); g.fill(); g.fillStyle = '#d7d9dc'; g.fillRect(17 + i * 27, 30 + j * 26, 6, 2); } });
+    add(new THREE.PlaneGeometry(W * 0.32, 0.6), this.clipped(new THREE.MeshStandardMaterial({ map: cbTex, roughness: 0.6 })), bx - 0.102, 1.3, -(W / 2 - W * 0.2), 0, -Math.PI / 2);
+    // 駕駛艙門
     const pivot = new THREE.Group(); pivot.position.set(bx - 0.03, 0, 0.42);
-    const door = new THREE.Mesh(new RoundedBoxGeometry(0.05, 1.98, 0.82, 2, 0.01), this.clipped(m.shellDark));
-    door.position.set(0, 0.99, -0.41); door.userData.propId = f.id;
+    const door = new THREE.Mesh(new RoundedBoxGeometry(0.06, 1.98, 0.82, 2, 0.01), dark); door.position.set(0, 0.99, -0.41); door.userData.propId = f.id;
     const fm = this.clipped(m.shell); fm.map = facadeTexture('cockpit'); fm.color = new THREE.Color('#ffffff');
-    const face = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 1.96), fm); face.position.set(0.027, 0.99, -0.41); face.rotation.y = Math.PI / 2; face.userData.propId = f.id;
-    pivot.add(door, face); this.cabin.add(pivot); this.propMeshes.push(door, face);
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 1.96), fm); face.position.set(0.032, 0.99, -0.41); face.rotation.y = Math.PI / 2; face.userData.propId = f.id;
+    const peep = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.07, 12), m.chrome); peep.rotation.z = Math.PI / 2; peep.position.set(0, 1.55, -0.41);
+    const handle = new THREE.Mesh(new RoundedBoxGeometry(0.03, 0.03, 0.14, 2, 0.01), m.chrome); handle.position.set(0.05, 1.0, -0.72);
+    pivot.add(door, face, peep, handle); this.cabin.add(pivot); this.propMeshes.push(door, face);
     this.pivots.set(f.id, { pivot, axis: 'y', base: 0, dir: 1, max: 1.45, cur: 0 });
-    const fl = new THREE.Mesh(new THREE.BoxGeometry(f.w, 0.05, ac.width * 0.9), new THREE.MeshStandardMaterial({ color: 0x4a5266, roughness: 0.8 }));
-    fl.position.set(f.x, 0.02, 0); this.cabin.add(fl);
+    // 地板、側牆內襯與側操縱台
+    add(new THREE.BoxGeometry(f.w, 0.04, W * 0.95), new THREE.MeshStandardMaterial({ color: 0x3a3f4a, roughness: 0.9 }), f.x, 0.02, 0);
+    for (const s of [-1, 1]) {
+      add(new THREE.BoxGeometry(f.w - 0.5, 1.15, 0.04), grey, f.x + 0.15, 1.0, s * (W / 2 - 0.08));
+      add(new RoundedBoxGeometry(f.w - 0.7, 0.12, 0.32, 3, 0.03), grey, f.x + 0.05, 0.72, s * (W / 2 - 0.25));
+      const tray = add(new THREE.PlaneGeometry(0.3, 0.25), this.clipped(new THREE.MeshStandardMaterial({ color: '#1b1e23', roughness: 0.4 })), f.x - 0.25, 0.783, s * (W / 2 - 0.25), -Math.PI / 2);
+      // 側窗與窗框
+      const sw = add(new THREE.PlaneGeometry(0.6, 0.4), this.winMat, x0 + 0.95, 1.42, s * (W / 2 - 0.1), 0, s > 0 ? Math.PI : 0); sw.castShadow = false;
+      add(new THREE.BoxGeometry(0.64, 0.03, 0.05), dark, x0 + 0.95, 1.63, s * (W / 2 - 0.12));
+      add(new THREE.BoxGeometry(0.64, 0.03, 0.05), dark, x0 + 0.95, 1.21, s * (W / 2 - 0.12));
+      if (airbus) {
+        // 側桿
+        add(new THREE.CylinderGeometry(0.03, 0.04, 0.06, 16), dark, f.x - 0.15, 0.8, s * (W / 2 - 0.22));
+        const stick = add(new RoundedBoxGeometry(0.05, 0.18, 0.05, 3, 0.02), this.clipped(new THREE.MeshStandardMaterial({ color: '#202328', roughness: 0.5 })), f.x - 0.15, 0.9, s * (W / 2 - 0.22), 0, 0, 0.15);
+        add(new THREE.SphereGeometry(0.012, 10, 8), new THREE.MeshStandardMaterial({ color: '#c0392b' }), f.x - 0.13, 0.99, s * (W / 2 - 0.22));
+      }
+    }
+    // 擋風玻璃（V 形四片）與窗框
+    [[-0.38, -0.32], [-0.12, -0.12], [0.12, 0.12], [0.38, 0.32]].forEach(([z, ry]) => {
+      const wp = add(new THREE.PlaneGeometry(0.42, 0.42), this.winMat, x0 + 0.33 + Math.abs(z) * 0.35, 1.5, z * (W / 2.4), 0, Math.PI / 2 + ry, 0); wp.castShadow = false;
+      add(new THREE.BoxGeometry(0.04, 0.46, 0.035), dark, x0 + 0.33 + Math.abs(z) * 0.35 + 0.005, 1.5, z * (W / 2.4) + (z > 0 ? 0.21 : -0.21) * Math.cos(ry), 0, ry, 0);
+    });
+    add(new THREE.BoxGeometry(0.06, 0.05, W * 0.8), dark, x0 + 0.38, 1.73, 0);
+    // 主儀表板（面向駕駛員，貼上動態顯示器貼圖）
+    const pw = W * 0.82;
+    add(new RoundedBoxGeometry(0.42, 0.72, pw, 3, 0.04), grey, x0 + 0.45, 0.88, 0, 0, 0, -0.12);
+    const panel = this.makeCockpitPanel(pw);
+    const pp = add(new THREE.PlaneGeometry(pw, 0.62), panel.mat, x0 + 0.665, 0.92, 0, 0, Math.PI / 2, 0); pp.rotation.order = 'YXZ'; pp.rotation.x = -0.12; pp.castShadow = false;
+    this.cockpitPanel = panel;
+    // 遮光罩與自動駕駛控制面板
+    add(new RoundedBoxGeometry(0.34, 0.08, pw * 0.98, 3, 0.03), dark, x0 + 0.62, 1.27, 0);
+    const fcuTex = canvasTex(1024, 64, (g) => { g.fillStyle = '#2d323b'; g.fillRect(0, 0, 1024, 64); g.fillStyle = '#0c0d0f'; [140, 330, 520, 710].forEach((x) => g.fillRect(x, 12, 120, 34)); g.fillStyle = '#ffb547'; g.font = '700 26px monospace'; [['SPD 250', 145], ['HDG 095', 335], ['ALT 35000', 522], ['V/S ----', 715]].forEach(([t, x]) => g.fillText(t, x + 4, 39)); g.fillStyle = '#d7dadf'; for (let i = 0; i < 10; i++) { g.beginPath(); g.arc(60 + i * 95, 50, 7, 0, 7); g.fill(); } });
+    add(new THREE.PlaneGeometry(pw * 0.7, 0.05), new THREE.MeshBasicMaterial({ map: fcuTex, toneMapped: false }), x0 + 0.792, 1.26, 0, 0, Math.PI / 2, 0);
+    // 頂板（滿滿的開關）
+    const ohTex = canvasTex(512, 512, (g) => {
+      g.fillStyle = '#3c424d'; g.fillRect(0, 0, 512, 512);
+      for (let i = 0; i < 8; i++) for (let j = 0; j < 10; j++) {
+        g.fillStyle = '#272b32'; g.fillRect(14 + i * 62, 12 + j * 49, 50, 40);
+        g.fillStyle = (i + j) % 5 === 0 ? '#e6b54a' : (i * j) % 7 === 1 ? '#3fae6b' : '#e9ecef'; g.fillRect(24 + i * 62, 18 + j * 49, 30, 12);
+        g.fillStyle = '#9aa1ab'; g.fillRect(24 + i * 62, 36 + j * 49, 30, 3);
+      }
+    });
+    add(new THREE.BoxGeometry(0.9, 0.06, W * 0.42), grey, f.x - 0.05, 2.0, 0, 0, 0, 0.25);
+    add(new THREE.PlaneGeometry(0.88, W * 0.4), new THREE.MeshStandardMaterial({ map: ohTex, roughness: 0.55, emissive: '#1a1c20', emissiveMap: ohTex, emissiveIntensity: 0.25 }), f.x - 0.05, 1.965, 0, Math.PI / 2, 0, -0.25).rotation.order = 'ZXY';
+    // 中央操縱台：推力桿、MCDU、無線電面板
+    const pedX0 = x0 + 0.5, pedX1 = f.x + 0.3;
+    add(new RoundedBoxGeometry(pedX1 - pedX0, 0.72, 0.34, 3, 0.03), grey, (pedX0 + pedX1) / 2, 0.36, 0);
+    const pedTex = canvasTex(256, 512, (g) => { g.fillStyle = '#2f343c'; g.fillRect(0, 0, 256, 512); g.fillStyle = '#0f1a14'; g.fillRect(20, 30, 216, 150); g.fillStyle = '#5fe08c'; g.font = '16px monospace'; ['INIT  FPLN', 'TPE  RJAA', 'CRZ FL350', 'COST 30', 'EFOB 7.2'].forEach((t, i) => g.fillText(t, 32, 60 + i * 24)); g.fillStyle = '#d9dce0'; for (let i = 0; i < 5; i++) for (let j = 0; j < 6; j++) g.fillRect(28 + i * 42, 200 + j * 28, 30, 18); g.fillStyle = '#1c1f24'; g.fillRect(20, 380, 216, 110); g.fillStyle = '#ff9f43'; g.fillText('118.700  121.500', 34, 440); });
+    add(new THREE.PlaneGeometry(0.33, pedX1 - pedX0 - 0.1), new THREE.MeshStandardMaterial({ map: pedTex, emissive: '#ffffff', emissiveMap: pedTex, emissiveIntensity: 0.25, roughness: 0.5 }), (pedX0 + pedX1) / 2, 0.722, 0, -Math.PI / 2, 0, Math.PI / 2);
+    for (const z of [-0.05, 0.05]) {
+      add(new RoundedBoxGeometry(0.03, 0.2, 0.02, 2, 0.008), m.chrome, pedX0 + 0.25, 0.83, z, 0, 0, -0.3);
+      add(new RoundedBoxGeometry(0.06, 0.04, 0.05, 2, 0.015), dark, pedX0 + 0.21, 0.93, z);
+    }
+    if (!airbus) {
+      // 駕駛盤（波音）
+      r.seats.forEach((st) => {
+        add(new THREE.CylinderGeometry(0.03, 0.035, 0.75, 12), dark, x0 + 0.78, 0.38, -st.y, 0, 0, 0.15);
+        const yoke = add(new THREE.TorusGeometry(0.14, 0.018, 8, 24, Math.PI), dark, x0 + 0.82, 0.86, -st.y, 0, Math.PI / 2, Math.PI);
+      });
+    }
+    // 駕駛座與駕駛員
     r.seats.forEach((st) => {
       const g = new THREE.Group();
-      const a = new THREE.Mesh(new RoundedBoxGeometry(0.5, 0.12, 0.5, 3, 0.04), m.fabric.J); a.position.y = 0.5;
-      const b = new THREE.Mesh(new RoundedBoxGeometry(0.1, 0.85, 0.5, 3, 0.04), m.fabric.J); b.position.set(0.24, 0.95, 0); b.rotation.z = -0.1;
-      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.12, 0.45, 16), m.metal); c.position.y = 0.22;
-      g.add(a, b, c); g.position.set(st.x, 0, -st.y); this.cabin.add(g);
-      // 駕駛員（深色制服、坐姿、面向機頭）
-      const pilot = makeCrew({ jacket: '#18202e', bottom: '#18202e', shirt: '#f2f2f2', scarf: '#18202e', hat: false, bottomType: 'pants', hair: '#1d1612', skin: st.y > 0 ? '#d4a582' : '#e2b897' });
-      pilot.position.set(st.x - 0.05, -0.38, -st.y); pilot.rotation.y = Math.PI; pilot.userData.animate(0, false, true, 1);
+      const mk = (geo, mat, x, y, z, rz = 0) => { const o = new THREE.Mesh(geo, mat); o.position.set(x, y, z); o.rotation.z = rz; o.castShadow = true; g.add(o); return o; };
+      const leather = m.fabric.J;
+      mk(new THREE.CylinderGeometry(0.05, 0.14, 0.3, 16), m.metal, 0, 0.15, 0);
+      mk(new RoundedBoxGeometry(0.52, 0.1, 0.5, 3, 0.04), dark, 0, 0.33, 0);
+      mk(new RoundedBoxGeometry(0.5, 0.13, 0.48, 4, 0.05), leather, -0.02, 0.45, 0);
+      mk(new RoundedBoxGeometry(0.13, 0.78, 0.48, 4, 0.05), leather, 0.25, 0.9, 0, -0.14);
+      mk(new RoundedBoxGeometry(0.11, 0.2, 0.3, 4, 0.05), leather, 0.32, 1.38, 0, -0.14);
+      for (const s of [-1, 1]) mk(new RoundedBoxGeometry(0.34, 0.05, 0.06, 2, 0.02), dark, 0.0, 0.7, s * 0.26);
+      g.position.set(st.x, 0, -st.y); this.cabin.add(g);
+      const captain = st.y < 0; // 機長坐左座
+      const pilot = makeCrew({ jacket: '#141b29', bottom: '#141b29', shirt: '#f4f4f2', scarf: '#141b29', hat: false, bottomType: 'pants', hair: captain ? '#3a3632' : '#1d1612', skin: captain ? '#cf9e7b' : '#e2b897', pilot: true, stripes: captain ? 4 : 3 });
+      pilot.position.set(st.x - 0.02, -0.4, -st.y); pilot.rotation.y = Math.PI; pilot.userData.animate(0, false, true, 1); pilot.userData.setHarness(true);
       this.cabin.add(pilot);
     });
-    const dash = new THREE.Mesh(new RoundedBoxGeometry(0.55, 0.9, ac.width * 0.8, 3, 0.06), this.clipped(m.shellDark));
-    dash.position.set(f.x - f.w / 2 + 0.28, 0.75, 0); this.cabin.add(dash);
-    for (let i = 0; i < 4; i++) {
-      const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.18), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.25, 0.55, 1.1), toneMapped: false }));
-      scr.position.set(f.x - f.w / 2 + 0.56, 1.0, -0.6 + i * 0.4); scr.rotation.y = Math.PI / 2; this.cabin.add(scr);
-    }
-    const ws = new THREE.Mesh(new THREE.PlaneGeometry(ac.width * 0.7, 0.45), new THREE.MeshBasicMaterial({ map: this.winTex, toneMapped: false, color: new THREE.Color(1.3, 1.3, 1.3) }));
-    ws.position.set(f.x - f.w / 2 + 0.05, 1.45, 0); ws.rotation.y = Math.PI / 2; ws.rotation.x = 0; this.cabin.add(ws);
+    // 觀察員座椅（摺疊在隔板上）
+    add(new RoundedBoxGeometry(0.06, 0.4, 0.42, 2, 0.02), dark, bx - 0.14, 0.95, -(W / 2 - 0.45));
+    // 駕駛艙微光（儀表反射）
+    const cl = new THREE.PointLight(0x9cc4ff, 0.6, 2.5, 2); cl.position.set(x0 + 0.9, 1.2, 0); this.cabin.add(cl);
+  }
+
+  // 駕駛艙顯示器：左右各 PFD/ND，中央兩個 ECAM，每秒更新數次姿態、速度、高度
+  makeCockpitPanel(pw) {
+    const c = document.createElement('canvas'); c.width = 1536; c.height = 384;
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, color: new THREE.Color(1.15, 1.15, 1.15) });
+    const panel = { c, tex, mat, last: -1 };
+    panel.draw = (env) => {
+      const g = c.getContext('2d');
+      g.fillStyle = '#2f343d'; g.fillRect(0, 0, 1536, 384);
+      const D = 220, y0 = 70;
+      const xs = [40, 290, 650, 900, 1250 - 0, 1500 - D];
+      const screen = (x) => { g.fillStyle = '#16191e'; g.fillRect(x - 10, y0 - 10, D + 20, D + 20); g.fillStyle = '#05070a'; g.fillRect(x, y0, D, D); };
+      const pfd = (x) => {
+        screen(x);
+        g.save(); g.beginPath(); g.rect(x, y0, D, D); g.clip();
+        const cx = x + D / 2, cy = y0 + D / 2 + (env.pitch || 0) * 4;
+        g.fillStyle = '#2f7ad8'; g.fillRect(x, y0, D, cy - y0); g.fillStyle = '#8a5a2b'; g.fillRect(x, cy, D, y0 + D - cy);
+        g.strokeStyle = '#fff'; g.lineWidth = 2; g.beginPath(); g.moveTo(x, cy); g.lineTo(x + D, cy); g.stroke();
+        for (let k = -2; k <= 2; k++) { if (!k) continue; g.beginPath(); g.moveTo(cx - 18, cy - k * 20); g.lineTo(cx + 18, cy - k * 20); g.stroke(); }
+        g.fillStyle = '#ffd44a'; g.fillRect(cx - 50, y0 + D / 2 - 2, 34, 5); g.fillRect(cx + 16, y0 + D / 2 - 2, 34, 5); g.fillRect(cx - 3, y0 + D / 2 - 3, 6, 6);
+        g.fillStyle = 'rgba(40,44,52,0.85)'; g.fillRect(x, y0, 38, D); g.fillRect(x + D - 46, y0, 46, D);
+        g.fillStyle = '#ffffff'; g.font = '700 15px monospace';
+        g.fillText(String(Math.round(Math.max(0, env.speed || 0))), x + 3, y0 + D / 2 + 5);
+        g.fillText(String(Math.round(env.alt || 0)).slice(0, 5), x + D - 44, y0 + D / 2 + 5);
+        g.restore();
+      };
+      const nd = (x) => {
+        screen(x);
+        const cx = x + D / 2, cy = y0 + D - 30;
+        g.strokeStyle = '#ffffff'; g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, 150, Math.PI * 1.2, Math.PI * 1.8); g.stroke();
+        g.strokeStyle = '#e055e0'; g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + 30, y0 + 30); g.lineTo(cx + 60, y0 + 10); g.stroke();
+        g.fillStyle = '#ffd44a'; g.beginPath(); g.moveTo(cx, cy - 12); g.lineTo(cx - 8, cy + 6); g.lineTo(cx + 8, cy + 6); g.fill();
+        g.fillStyle = '#5fe08c'; g.font = '13px monospace'; g.fillText('GS 480  TAS 495', x + 8, y0 + 18); g.fillText('RJAA  1240NM', x + D - 110, y0 + 18);
+      };
+      const ecam = (x, lower) => {
+        screen(x);
+        g.strokeStyle = '#ffffff'; g.lineWidth = 3;
+        for (const k of [0, 1]) {
+          const cx = x + 60 + k * 100, cy = y0 + 70;
+          g.beginPath(); g.arc(cx, cy, 36, Math.PI * 0.8, Math.PI * 2.2); g.stroke();
+          const n1 = env.speed > 100 ? 0.75 : 0.3;
+          g.strokeStyle = '#5fe08c'; g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(Math.PI * (0.8 + 1.4 * n1)) * 32, cy + Math.sin(Math.PI * (0.8 + 1.4 * n1)) * 32); g.stroke(); g.strokeStyle = '#ffffff';
+          g.fillStyle = '#5fe08c'; g.font = '700 16px monospace'; g.fillText((n1 * 100).toFixed(1), cx - 22, cy + 30);
+        }
+        g.fillStyle = lower ? '#5fe08c' : '#ffd44a'; g.font = '14px monospace';
+        (lower ? ['CAB PR  ALT 6000FT', 'TEMP  24 22 23', 'DOORS  ARMED', 'FOB  7200 KG'] : ['ENG 1  ENG 2', 'EGT   525  530', 'FF    2400 2380', 'SEAT BELTS ' + (env.seatbelt ? 'ON' : 'OFF')]).forEach((t, i) => g.fillText(t, x + 14, y0 + 130 + i * 22));
+      };
+      pfd(xs[0]); nd(xs[1]); ecam(xs[2], false); ecam(xs[3], true); nd(xs[4]); pfd(xs[5]);
+      g.fillStyle = '#d7dadf'; for (let i = 0; i < 30; i++) g.fillRect(40 + i * 49, 330, 24, 10);
+      tex.needsUpdate = true;
+    };
+    panel.draw({ pitch: 0, speed: 0, alt: 0 });
+    return panel;
   }
 
   // ---- 氧氣面罩（落下後懸掛擺動） ----
@@ -1015,6 +1181,20 @@ export class View3D {
       if (pv.axis === 'x') pv.pivot.rotation.x = pv.dir * pv.max * pv.cur;
       else pv.pivot.rotation.y = pv.base + pv.dir * pv.max * pv.cur;
     });
+    // 餐車位置
+    if (this.cart) {
+      const cp = sim && sim.cart ? sim.cart : this.cartHome;
+      if (cp) { this.cart.visible = true; this.cart.position.copy(P(cp.x, cp.y, 0)); } else this.cart.visible = false;
+    }
+    // 已送餐旅客桌板上的餐點
+    if (sim && sim.service) for (const [seat, sv] of Object.entries(sim.service.served)) {
+      if (this.trays.has(seat) || sv.meal === 'none') continue;
+      const g = this.paxMeshes.get(seat); if (!g) continue;
+      const col = { coffee: '#4a2c1a', tea: '#a5652a', oj: '#f2a33a', apple: '#e3c45a', coke: '#3a1d10', water: '#cfe3ef', beer: '#e0b440', wine: '#6e1625' }[sv.drink];
+      const tr = makeMealTray(col); tr.position.set(-0.42, 0.72, 0); g.add(tr); this.trays.set(seat, tr);
+    }
+    // 駕駛艙顯示器
+    if (this.cockpitPanel && (!this.cockpitPanel.t || t - this.cockpitPanel.t > 0.15)) { this.cockpitPanel.t = t; this.cockpitPanel.draw(env); }
     if (sim && sim.oxygen) {
       this.ensureOxygen(sim);
       this.oxyBuilt.forEach((g) => g.children.forEach((m1) => { m1.rotation.x = Math.sin(t * 1.7 + m1.userData.phase) * 0.12; m1.rotation.z = Math.cos(t * 1.3 + m1.userData.phase) * 0.1; }));
@@ -1057,6 +1237,7 @@ export class View3D {
         this.player.rotation.y += d * Math.min(1, dt * 10);
       }
       this.player.userData.animate(t, moving, walker.seated, dt);
+      if (this.player.userData.setHarness) this.player.userData.setHarness(!!(walker.seated && walker.belted));
     } else if (this.player) this.player.visible = false;
     if (sim) {
       sim.npcs.forEach((n) => {

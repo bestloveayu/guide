@@ -1,6 +1,6 @@
 // 飛行模擬引擎：階段時間軸、任務佇列、移動、評分、組員分派
-import { PHASES, RANKS, rankOf, DEFAULT_CREW, ANNOUNCEMENTS, PRIORITY, PILOTS } from './data.js';
-import { buildGrid, findPath, approachPoint, findSeat, findFixture, rowsOf, walkable, slideMove, roomLayout, binDoors } from './layout.js';
+import { PHASES, RANKS, rankOf, DEFAULT_CREW, ANNOUNCEMENTS, PRIORITY, PILOTS, MEALS, DRINKS } from './data.js';
+import { buildGrid, findPath, approachPoint, findSeat, findFixture, rowsOf, walkable, slideMove, roomLayout, binDoors, collides } from './layout.js';
 
 const WALK_SPEED = 1.7; // m/s
 const lerp = (a, b, t) => a + (b - a) * Math.max(0, Math.min(1, t));
@@ -49,6 +49,7 @@ export class Flight {
       .map((def) => ({ def, status: 'waiting', remaining: def.limit, quality: 0, assignee: null, covered: new Set(), activeSince: 0 }));
     this.env = { alt: 0, speed: 0, pitch: 0, shake: 0, lights: 1, seatbelt: true, doorsOpen: true, ground: true, turbulence: 0, groundScroll: 0 };
     this.initProps();
+    this.initService();
   }
 
   get phase() { return PHASES[this.phaseIdx]; }
@@ -68,7 +69,7 @@ export class Flight {
   }
   inRange(task, who = this.player) {
     const k = task.def.kind;
-    if (k === 'announce' || k === 'manage' || k === 'walk') return true;
+    if (k === 'announce' || k === 'manage' || k === 'walk' || k === 'service') return true;
     const p = this.targetPos(task);
     if (!p) return true; // 找不到目標（例如座位已被移除）就不限制距離
     if (p.seat) return Math.abs(who.x - p.x) <= 0.85 && Math.abs(who.y - p.y) <= 2.6;
@@ -81,11 +82,17 @@ export class Flight {
     return this.tasks.filter((t) => t.status === 'active' || t.status === 'delegated')
       .sort((a, b) => a.def.priority - b.def.priority || a.remaining - b.remaining);
   }
-  interactables() { return this.activeTasks().filter((t) => t.status === 'active' && t.def.kind !== 'walk' && this.inRange(t)); }
+  interactables() { return this.activeTasks().filter((t) => t.status === 'active' && t.def.kind !== 'walk' && t.def.kind !== 'service' && !(t.def.kind === 'cart' && this.cart.state === 'out') && this.inRange(t)); }
 
   // ---- 移動 ----
   goTo(task) {
     if (!task) return;
+    if (task.def.kind === 'service') {
+      if (this.cart.state !== 'out') { const g = this.galleyFixture(); if (g) this.walkTo(approachPoint(this.ac, this.grid, g)); return; }
+      const row = this.rows.find((r) => r.seats.some((s) => this.mood[s.id] != null && !this.service.served[s.id]));
+      if (row) this.walkTo({ x: row.x, y: this.player.y });
+      return;
+    }
     if (task.def.kind === 'walk') { // 巡查：走到最後一排
       const last = this.rows[this.rows.length - 1], first = this.rows[0];
       const far = Math.abs(this.player.x - first.x) < Math.abs(this.player.x - last.x) ? last : first;
@@ -105,7 +112,15 @@ export class Flight {
     if ((dx || dy) && this.player.belted) { this.hint('你正繫著安全帶坐在組員座椅上，請先解開安全帶（按 E）。', 'belt'); return; }
     if (dx || dy) this.standUp();
     if (dx || dy) this.player.path = [];
+    const ox = this.player.x, oy = this.player.y;
+    if (this.cart.state === 'out') { dx *= 0.6; dy *= 0.6; }
     slideMove(this.grid, this.player, dx, dy);
+    if (this.cart.state === 'out') {
+      const mdx = this.player.x - ox, mdy = this.player.y - oy;
+      const dir = Math.abs(mdx) > 0.002 && Math.abs(mdx) > Math.abs(mdy) ? Math.sign(mdx) : this.cart.dir;
+      if (collides(this.grid, this.player.x + dir * 0.62, this.player.y, 0.15)) { this.player.x = ox; this.player.y = oy; this.hint('餐車卡住了，換個方向或先推回廚房。', 'cart'); }
+      else this.updateCart(false, mdx, mdy);
+    }
     if (dx || dy) this.player.heading = Math.atan2(dy, dx);
   }
   standUp() {
@@ -121,7 +136,8 @@ export class Flight {
   }
   stepActor(a, dt) {
     if (!a.path || !a.path.length) return false;
-    let move = WALK_SPEED * dt;
+    let move = WALK_SPEED * dt * (a === this.player && this.cart && this.cart.state === 'out' ? 0.6 : 1);
+    const ax0 = a.x, ay0 = a.y;
     while (move > 0 && a.path.length) {
       const t = a.path[0];
       const dx = t.x - a.x, dy = t.y - a.y, d = Math.hypot(dx, dy);
@@ -129,6 +145,7 @@ export class Flight {
       a.heading = Math.atan2(dy, dx);
       if (d <= move) { a.x = t.x; a.y = t.y; a.path.shift(); move -= d; } else { a.x += (dx / d) * move; a.y += (dy / d) * move; move = 0; }
     }
+    if (a === this.player && this.cart) this.updateCart(false, a.x - ax0, a.y - ay0);
     return true;
   }
 
@@ -138,6 +155,7 @@ export class Flight {
     if (!this.inRange(task)) { this.goTo(task); return; }
     const k = task.def.kind;
     if (k === 'goto') this.complete(task, Math.round(lerp(70, 100, task.remaining / task.def.limit)));
+    else if (k === 'cart') this.pushCart();
     else if (k === 'seated') {
       const f = this.targetPos(task)?.fixture;
       if (f) this.sitAt(f); else { this.player.path = []; this.player.seated = true; }
@@ -288,6 +306,14 @@ export class Flight {
         }
       }
     }
+    // 餐車
+    const gal = this.galleyFixture();
+    if (gal && this.cart.state === 'stowed' && this.fixtureDist(gal) < 1.3) acts.push({ id: 'cart:' + gal.id, label: '推出餐車', run: () => this.pushCart() });
+    if (this.cart.state === 'out') {
+      if (this.cart.home && Math.hypot(pl.x - this.cart.home.x, pl.y - this.cart.home.y) < 1.6) acts.push({ id: 'stow', label: '推回廚房並固定餐車', run: () => this.stowCart() });
+      const srow = this.rows.find((r) => Math.abs(r.x - pl.x) < 0.6 && this.rowUnserved(r).length);
+      if (srow) acts.unshift({ id: 'serve:' + srow.row, label: `為第 ${srow.row} 排旅客送餐（${this.rowUnserved(srow).length} 位）`, run: () => this.openService(srow), task: true });
+    }
     // 行李櫃（伸手可及：同側、前後 0.8 m 內）
     const reach = this.binsInfo.doors.filter((b) => pl.x > b.x0 - 0.3 && pl.x < b.x1 + 0.3 && Math.abs(pl.y - b.side * this.binsInfo.inner) < 1.45)
       .sort((a, b) => Math.abs(pl.x - a.x) + Math.abs(pl.y - a.side * 2) * 0.1 - (Math.abs(pl.x - b.x) + Math.abs(pl.y - b.side * 2) * 0.1));
@@ -417,10 +443,14 @@ export class Flight {
   // 起降開始時的客艙狀態檢查
   checkCabinSecured() {
     const name = this.phase.name;
-    const openBins = Object.values(this.binOpen).filter(Boolean).length;
-    if (openBins) this.violation(`${name}時仍有 ${openBins} 個行李櫃未關閉`, 'binsec');
-    const lavs = this.ac.fixtures.filter((f) => f.type === 'lav' && this.doorOpen[f.id]).length;
-    if (lavs) this.violation(`${name}時洗手間門未關閉`, 'lavsec');
+    if (this.phase.id !== 'descent') {
+      const openBins = Object.values(this.binOpen).filter(Boolean).length;
+      if (openBins) this.violation(`${name}時仍有 ${openBins} 個行李櫃未關閉`, 'binsec');
+      const lavs = this.ac.fixtures.filter((f) => f.type === 'lav' && this.doorOpen[f.id]).length;
+      if (lavs) this.violation(`${name}時洗手間門未關閉`, 'lavsec');
+    }
+    if (this.cart && this.cart.state === 'out') { this.violation(`${name}時餐車未收回固定`, 'cartsec'); this.stowCart(); }
+    if (this.phase.id === 'descent') return;
     const ck = this.cockpitFixture();
     if (ck && this.doorOpen[ck.id]) { this.violation(`${name}時駕駛艙門未關閉`, 'cksec'); this.doorOpen[ck.id] = false; this.rebuildGrid(); }
   }
@@ -493,6 +523,123 @@ export class Flight {
     return { reply, mood: this.mood[seat], patience: Math.round(st.patience) };
   }
 
+
+  // =================== 餐車與餐飲服務 ===================
+  initService() {
+    const galley = findFixture(this.ac, 'galley', this.player);
+    this.cart = { state: 'stowed', dir: 1, x: 0, y: 0, turbT: 0 };
+    if (galley) {
+      const W = this.ac.width;
+      let fx = 0, fy = 0;
+      if (Math.abs(galley.y) > 0.3 && galley.d < W * 0.8) fy = galley.y < 0 ? 1 : -1; else fx = galley.x < this.ac.length / 2 ? 1 : -1;
+      this.cart.home = { x: galley.x + fx * (galley.w / 2 + 0.17), y: galley.y + fy * (galley.d / 2 + 0.17) };
+      this.cart.galleyId = galley.id;
+      Object.assign(this.cart, this.cart.home);
+    }
+    const seats = Object.keys(this.mood);
+    const count = (t) => this.sc.passengers.filter((p) => seats.includes(p.seat) && p.type === t).length;
+    const n = seats.length;
+    this.service = {
+      served: {}, correct: 0, total: 0, errors: [], prefs: {},
+      stock: { beef: Math.ceil(n * 0.42), chicken: Math.ceil(n * 0.6), veg: count('meal'), kids: count('child') },
+      target: Math.max(4, Math.min(18, Math.ceil(n * 0.55))),
+    };
+    const drinksW = [['water', 3], ['oj', 2], ['apple', 1], ['coke', 2], ['coffee', 2], ['tea', 2], ['beer', 1], ['wine', 1]];
+    seats.forEach((seat) => {
+      const p = this.sc.passengers.find((x) => x.seat === seat) || { type: 'normal' };
+      let hh = 0; for (const ch of seat + (p.name || '')) hh = (hh * 31 + ch.charCodeAt(0)) >>> 0;
+      const r = () => { hh = (hh * 1103515245 + 12345) >>> 0; return (hh >>> 8) / 16777216; };
+      let meal, drink;
+      if (p.type === 'meal') meal = 'veg';
+      else if (p.type === 'child') meal = 'kids';
+      else if (p.type === 'drunk') meal = 'any';
+      else { const x = r(); meal = x < 0.1 ? 'none' : x < 0.62 ? 'beef' : 'chicken'; }
+      if (p.type === 'drunk') drink = 'beer';
+      else if (p.type === 'child') drink = r() < 0.5 ? 'oj' : 'apple';
+      else if (p.type === 'elder') drink = 'tea';
+      else if (p.type === 'anxious' || p.type === 'medical') drink = 'water';
+      else { let x = r() * 14; drink = drinksW.find(([, w]) => (x -= w) < 0)[0]; }
+      this.service.prefs[seat] = { meal, drink, saysSpecial: r() < 0.5 };
+    });
+  }
+  galleyFixture() { return this.ac.fixtures.find((f) => f.id === this.cart.galleyId); }
+  pushCart() {
+    if (this.cart.state === 'out') return;
+    if (this.movingPhase()) this.violation(`${this.phase.name}期間推出餐車`, 'cartphase');
+    else if (this.env.seatbelt && this.phase.id !== 'boarding') this.violation('安全帶指示燈亮著時推出餐車', 'cartbelt');
+    this.cart.state = 'out';
+    const mid = this.rows[Math.floor(this.rows.length / 2)];
+    this.cart.dir = mid && mid.x < this.player.x ? -1 : 1;
+    this.updateCart(true);
+    this.say('系統', '餐車已推出（煞車放開）。推車時移動較慢；走到每一排旁按 E 開始詢問旅客。', 'info');
+    const t = this.tasks.find((k) => k.status === 'active' && k.def.kind === 'cart');
+    if (t) this.complete(t, 100, null);
+  }
+  stowCart() {
+    this.cart.state = 'stowed'; Object.assign(this.cart, this.cart.home); this.cart.turbT = 0;
+    this.say('系統', '餐車已推回廚房並踩下煞車固定。', 'good');
+  }
+  updateCart(force, movedDx = 0, movedDy = 0) {
+    if (this.cart.state !== 'out') return;
+    if (Math.abs(movedDx) > 0.002 && Math.abs(movedDx) > Math.abs(movedDy)) this.cart.dir = Math.sign(movedDx);
+    this.cart.x = this.player.x + this.cart.dir * 0.62; this.cart.y = this.player.y;
+  }
+  rowUnserved(row) {
+    return row.seats.filter((s) => this.mood[s.id] != null && !this.service.served[s.id] && this.passengerInRange(s.id));
+  }
+  openService(row) {
+    const list = this.rowUnserved(row);
+    if (!list.length) return;
+    this.modalOpen = true;
+    this.hooks.onService && this.hooks.onService({ row: row.row, seats: list.map((s) => s.id) });
+  }
+  serviceRequest(seat) {
+    const pr = this.service.prefs[seat];
+    const p = this.sc.passengers.find((x) => x.seat === seat) || {};
+    const dn = (DRINKS.find((d) => d.id === pr.drink) || {}).name;
+    const mn = (MEALS.find((m) => m.id === pr.meal) || {}).name;
+    let text;
+    if (pr.meal === 'none') text = `我不用餐，謝謝。給我一杯${dn}就好。`;
+    else if (pr.meal === 'veg') text = pr.saysSpecial ? `我有預訂素食餐喔。飲料要${dn}。` : `今天有什麼可以選？飲料給我${dn}。`;
+    else if (pr.meal === 'kids') text = `（家長）小朋友有預訂兒童餐，飲料要${dn}。`;
+    else if (pr.meal === 'any') text = '吃什麼都好啦！給我一罐啤酒！快點！';
+    else text = `請給我${mn}，飲料要${dn}。`;
+    return { seat, name: p.name || '旅客', type: p.type || 'normal', note: p.note || '', text };
+  }
+  servePassenger(seat, meal, drink, apologized) {
+    this.modalOpen = true;
+    const pr = this.service.prefs[seat], st = this.service.stock;
+    const p = this.sc.passengers.find((x) => x.seat === seat) || {};
+    let dm = 0, ok = true; const notes = [];
+    const special = (id) => (MEALS.find((m) => m.id === id) || {}).special;
+    // 餐點
+    if (pr.meal === 'none') { if (meal !== 'none') { dm -= 2; notes.push('我說不用餐了。'); } }
+    else if (special(pr.meal)) {
+      if (meal === pr.meal) { dm += 9; notes.push('謝謝，特殊餐沒有弄錯。'); }
+      else { dm -= 18; ok = false; notes.push(`這不是我預訂的${(MEALS.find((m) => m.id === pr.meal) || {}).name}！`); this.service.errors.push(`${seat} 特殊餐送錯`); }
+    } else if (pr.meal === 'any') { if (meal === 'none' || special(meal)) { dm -= 3; ok = special(meal) ? false : ok; } else dm += 3; }
+    else if (meal === pr.meal) { dm += 6; }
+    else if (meal !== 'none' && (st[pr.meal] || 0) <= 0) {
+      if (apologized) { dm -= 1; notes.push(pr.meal === 'beef' ? '牛肉麵送完了啊？好吧，雞肉飯也可以。' : '雞肉飯送完了啊？好吧，牛肉麵也可以。'); }
+      else { dm -= 8; ok = false; notes.push('我要的不是這個，也不先說一聲？'); }
+    } else { dm -= 10; ok = false; notes.push('我點的不是這個。'); }
+    if (meal !== 'none' && special(meal) && meal !== pr.meal) { this.service.errors.push(`把${(MEALS.find((m) => m.id === meal) || {}).name}給了 ${seat}`); ok = false; }
+    if (meal !== 'none') st[meal] = Math.max(0, (st[meal] || 0) - 1);
+    // 飲料
+    const d = DRINKS.find((x) => x.id === drink) || {};
+    if (p.type === 'drunk' && d.alcohol) { this.violation('對飲酒過量的旅客提供酒精飲料', 'drunkbeer'); dm += 2; ok = false; }
+    else if (p.type === 'drunk' && !d.alcohol) { dm -= 1; notes.push('……水？好吧。'); }
+    else if (drink === pr.drink) dm += 4;
+    else { dm -= 4; ok = false; notes.push('飲料好像拿錯了。'); }
+    if (d.hot && this.env.turbulence > 0) this.violation('亂流期間提供熱飲', 'hotdrink');
+    this.mood[seat] = Math.max(0, Math.min(100, (this.mood[seat] ?? 70) + dm));
+    this.service.served[seat] = { meal, drink };
+    this.service.total++; if (ok) this.service.correct++;
+    const reply = notes.length ? notes.join(' ') : (dm > 0 ? '謝謝你！' : '嗯。');
+    this.say(`旅客（${seat}）`, reply, dm > 0 ? 'good' : dm < 0 ? 'bad' : 'info');
+    return { reply, ok, mood: this.mood[seat], dm };
+  }
+
   // ---- 主迴圈 ----
   update(realDt) {
     if (this.ended) return;
@@ -527,6 +674,11 @@ export class Flight {
           if (t.covered.size >= Math.ceil(this.rows.length * 0.9)) this.complete(t, Math.round(lerp(75, 100, t.remaining / t.def.limit)), '客艙檢查完成：安全帶、椅背、桌板、遮光板都確認了。');
         }
         if (t.status === 'active' && t.def.kind === 'seated' && this.player.seated && this.player.belted) this.complete(t, 100, null);
+        if (t.status === 'active' && t.def.kind === 'cart' && this.cart.state === 'out') this.complete(t, 100, null);
+        if (t.status === 'active' && t.def.kind === 'service' && this.service.total >= this.service.target) {
+          const q = Math.round((this.service.correct / Math.max(1, this.service.total)) * 100);
+          this.complete(t, q, `餐飲服務完成：送出 ${this.service.total} 份，正確 ${this.service.correct} 份。記得把餐車推回廚房。`);
+        }
         if ((t.status === 'active' || t.status === 'delegated') && t.remaining <= 0) this.fail(t);
       }
     }
@@ -547,7 +699,14 @@ export class Flight {
         }
       }
     }
-    if (this.env.turbulence > 0) this.env.turbulence -= gdt;
+    if (this.env.turbulence > 0) {
+      if (this.cart.state === 'out') {
+        if (this.cart.turbT === 0) this.say(this.judgeName('senior'), '亂流！立刻停止服務、踩煞車，把餐車推回廚房固定！', 'warn');
+        this.cart.turbT += gdt;
+        if (this.cart.turbT > 20) { this.violation('亂流期間餐車未收回固定', 'cartturb'); this.cart.turbT = -999; }
+      }
+      this.env.turbulence -= gdt;
+    }
     // 旅客耐心：有待處理需求時下降，平時慢慢恢復；耐心耗盡會影響心情
     const waiting = new Set(this.activeTasks().filter((t) => t.def.target && t.def.target.seat).map((t) => t.def.target.seat));
     for (const [seat, st] of Object.entries(this.pax)) {
@@ -591,7 +750,7 @@ export class Flight {
       deplane: [P, '飛機已停妥，各艙門解除預位並交互檢查。'],
     };
     if (lines[id]) this.say(lines[id][0], lines[id][1], 'info');
-    if (id === 'takeoff' || id === 'landing') this.checkCabinSecured();
+    if (id === 'takeoff' || id === 'landing' || id === 'descent') this.checkCabinSecured();
     this.hooks.onPhase && this.hooks.onPhase(this.phase);
   }
 
@@ -650,6 +809,7 @@ export class Flight {
       date: new Date().toISOString(),
       tasks: counted.map((t) => ({ title: t.def.title, status: t.status, quality: t.quality, priority: t.def.priority })),
       violations: this.stats.violations.slice(),
+      service: this.service ? { served: this.service.total, correct: this.service.correct, errors: this.service.errors.slice() } : null,
     };
     if (asFailure) return result;
     this.hooks.onEnd && this.hooks.onEnd(result);

@@ -245,7 +245,8 @@ export function defaultTasks() {
     // 起飛
     { id: 'T11', title: '回到組員座椅就座', kind: 'seated', phase: 'takeoff', at: 0, priority: 1, limit: 20, target: { fixture: 'jumpseat' }, xp: 20, minRank: 0, desc: '起飛時必須坐在組員座椅並繫好安全帶與肩帶，進行「靜默檢查」(30 秒複習)。起飛中不可解開安全帶、站起或開啟行李櫃。' },
     // 巡航
-    { id: 'T12', title: '準備餐車', kind: 'goto', phase: 'cruise', at: 0, priority: 3, limit: 60, target: { fixture: 'galley' }, xp: 15, minRank: 0 },
+    { id: 'T12', title: '推出餐車', kind: 'cart', phase: 'cruise', at: 0, priority: 3, limit: 60, target: { fixture: 'galley' }, xp: 15, minRank: 0, desc: '到廚房確認餐點與飲料數量、特殊餐名單，打開煞車後推出餐車。' },
+    { id: 'T26', title: '餐飲服務', kind: 'service', phase: 'cruise', at: 5, priority: 3, limit: 175, xp: 45, minRank: 0, desc: '推著餐車沿走道詢問旅客餐點與飲料並送上；注意特殊餐名單、存量、飲酒過量旅客。遇亂流須停止服務並收回餐車，下降前餐車必須收回固定。' },
     {
       id: 'T13', title: '特殊餐確認', kind: 'talk', phase: 'cruise', at: 15, priority: 3, limit: 60, target: { seat: '9A' }, xp: 15, minRank: 0,
       prompt: '你好，我有預訂素食餐，剛剛發的好像是雞肉的？',
@@ -345,3 +346,16 @@ export function defaultScenario(aircraftId = 'a321') {
 
 // 駕駛艙組員（駕駛艙門互動時回應）
 export const PILOTS = { captain: '機長 王志遠', fo: '副駕駛 林佳穎' };
+
+// ---- 餐飲服務 ----
+export const MEALS = [
+  { id: 'beef', name: '紅燒牛肉麵' },
+  { id: 'chicken', name: '照燒雞肉飯' },
+  { id: 'veg', name: '素食餐（特殊餐）', special: true },
+  { id: 'kids', name: '兒童餐（特殊餐）', special: true },
+];
+export const DRINKS = [
+  { id: 'water', name: '礦泉水' }, { id: 'oj', name: '柳橙汁' }, { id: 'apple', name: '蘋果汁' }, { id: 'coke', name: '可樂' },
+  { id: 'coffee', name: '熱咖啡', hot: true }, { id: 'tea', name: '熱茶', hot: true }, { id: 'beer', name: '啤酒', alcohol: true }, { id: 'wine', name: '紅酒', alcohol: true },
+];
+export const SCENARIO_VERSION = 2;

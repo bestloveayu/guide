@@ -1,5 +1,5 @@
 // 主程式：狀態、介面面板、模式切換、模擬流程
-import { PHASES, RANKS, rankOf, PRIORITY, PAX_TYPES, FIXTURE_TYPES, SEAT_CLASS, AIRLINES, AIRCRAFT_SPECS, ANNOUNCEMENTS, phaseName, defaultScenario } from './data.js';
+import { PHASES, RANKS, rankOf, PRIORITY, PAX_TYPES, FIXTURE_TYPES, SEAT_CLASS, AIRLINES, AIRCRAFT_SPECS, ANNOUNCEMENTS, phaseName, defaultScenario, MEALS, DRINKS } from './data.js';
 import { buildTemplate, buildFromSpec, findSeat, rowsOf, removeRows, insertRowAfter, generateInRect, newId, buildGrid, walkable, approachPoint, findFixture, slideMove, findPath } from './layout.js';
 import { load, save, download, readFile, resetAll } from './store.js';
 import { View2D } from './view2d.js';
@@ -648,6 +648,7 @@ class App {
         onAnnounce: (t) => this.showAnnounce(t),
         onChat: (seat, info) => this.showChat(seat, info),
         onCockpit: () => this.showCockpit(),
+        onService: (info) => this.showService(info),
         onEnd: (r) => this.endFlight(r),
         onTaskChange: () => { this.taskListDirty = true; },
         onPhase: () => { this.taskListDirty = true; },
@@ -729,6 +730,52 @@ class App {
       h('div', { class: 'muted', style: 'margin-top:8px' }, `你要對旅客說什麼？（${sim.phase.name}階段・安全帶燈${sim.env.seatbelt ? '亮' : '熄'}）`),
       optsBox, result,
       h('div', { class: 'btns', style: 'justify-content:flex-end' }, close)), true);
+  }
+
+  // ---- 推餐車送餐 ----
+  showService(info) {
+    const sim = this.sim;
+    const queue = info.seats.slice();
+    const special = this.scenario().passengers.filter((p) => (p.type === 'meal' || p.type === 'child') && sim.mood[p.seat] != null)
+      .map((p) => `${p.seat} ${p.type === 'meal' ? '素食餐' : '兒童餐'}${sim.service.served[p.seat] ? ' ✔' : ''}`);
+    const body = h('div');
+    const next = () => {
+      body.innerHTML = '';
+      const seat = queue.shift();
+      if (!seat) { body.append(h('p', {}, `第 ${info.row} 排服務完成。繼續推車到下一排。`), h('div', { class: 'btns', style: 'justify-content:flex-end' }, h('button', { class: 'primary', onclick: () => { this.closeModal(); sim.cancelModal(); } }, '完成'))); return; }
+      const rq = sim.serviceRequest(seat);
+      const t = PAX_TYPES[rq.type] || PAX_TYPES.normal;
+      let meal = null, drink = null;
+      const st = sim.service.stock;
+      const mealBtns = h('div', { class: 'choice' }, [...MEALS, { id: 'none', name: '不用餐' }].map((m) => {
+        const left = m.id === 'none' ? null : st[m.id] || 0;
+        const b = h('button', { disabled: left === 0, onclick: () => { meal = m.id; [...mealBtns.children].forEach((x) => x.classList.toggle('on', x === b)); } }, m.name, left == null ? null : h('small', {}, left ? ` 剩 ${left}` : ' 已送完'));
+        return b;
+      }));
+      const drinkBtns = h('div', { class: 'choice' }, DRINKS.map((d) => {
+        const b = h('button', { onclick: () => { drink = d.id; [...drinkBtns.children].forEach((x) => x.classList.toggle('on', x === b)); } }, d.name, d.hot ? h('small', {}, ' 熱') : d.alcohol ? h('small', {}, ' 酒精') : null);
+        return b;
+      }));
+      const apo = h('input', { type: 'checkbox', id: 'apologyChk' });
+      const result = h('div');
+      const send = h('button', { class: 'primary', onclick: () => {
+        if (!meal || !drink) { this.toast('系統', '請先選擇餐點與飲料。', 'warn'); return; }
+        const r = sim.servePassenger(seat, meal, drink, apo.checked);
+        mealBtns.remove(); drinkBtns.remove(); send.remove(); apoRow.remove();
+        result.append(h('div', { class: 'speaker' }, h('div', { class: 'ava' }, t.icon), h('div', { class: 'bubble' }, h('b', {}, `${rq.name}（${seat}）${r.ok ? ' ✔' : ' ✘'}`), r.reply)),
+          h('div', { class: 'btns', style: 'justify-content:flex-end' }, h('button', { class: 'primary', onclick: next }, queue.length ? `下一位（${queue[0]}）` : '完成這一排')));
+      } }, '遞給旅客');
+      const apoRow = h('label', { style: 'color:var(--text);margin-top:8px' }, apo, ' 先向旅客致歉並說明（想要的餐點已送完時）');
+      body.append(
+        h('div', { class: 'speaker' }, h('div', { class: 'ava' }, t.icon), h('div', { class: 'bubble' }, h('b', {}, `${rq.name}（${seat}）${rq.note ? '・' + rq.note : ''}`), rq.text)),
+        h('label', {}, '餐點'), mealBtns, h('label', {}, '飲料'), drinkBtns, apoRow, result,
+        h('div', { class: 'btns', style: 'justify-content:flex-end' }, send, h('button', { onclick: () => { this.closeModal(); sim.cancelModal(); } }, '暫停服務')));
+    };
+    this.openModal(h('div', {},
+      h('h2', {}, `🍽 第 ${info.row} 排　餐飲服務`),
+      h('div', { class: 'muted' }, `特殊餐名單：${special.join('、') || '無'}　｜　已送出 ${sim.service.total} 份（目標 ${sim.service.target}）`),
+      body), true);
+    next();
   }
 
   // ---- 駕駛艙門內線 ----
@@ -929,6 +976,7 @@ class App {
       after > before ? h('div', { class: 'card', style: 'border-color:var(--accent-2);margin-top:10px' },
         h('b', { style: 'color:var(--accent-2);font-size:16px' }, `🎉 晉升為「${RANKS[after].name}」！`), h('div', {}, RANKS[after].desc)) : null,
       h('p', { class: 'muted' }, next ? `目前 ${p.xp} XP，距離「${next.name}」還差 ${next.xp - p.xp} XP。` : `目前 ${p.xp} XP，已達最高職級。`),
+      r.service && r.service.served ? h('p', { class: 'muted' }, `餐飲服務：送出 ${r.service.served} 份，正確 ${r.service.correct} 份${r.service.errors.length ? '；錯誤：' + r.service.errors.join('、') : ''}`) : null,
       r.violations && r.violations.length ? h('details', { open: true }, h('summary', {}, `違規紀錄（${r.violations.length}）`), h('ul', {}, r.violations.map((v) => h('li', { style: 'color:#ffb3b3' }, v)))) : null,
       h('details', {}, h('summary', {}, '任務明細'), h('ul', {}, r.tasks.map((t) => h('li', {}, `${t.status === 'done' ? '✔' : '✘'} ${t.title}${t.status === 'done' ? `（${t.quality}）` : ''}`)))),
       h('div', { class: 'btns', style: 'justify-content:flex-end' },

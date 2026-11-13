@@ -194,3 +194,9 @@ details summary { cursor: pointer; color: var(--muted); }
 #interactBox { max-width: min(720px, 92%); flex-direction: row !important; flex-wrap: wrap; justify-content: center; }
 #interactBox button { font-size: 13px; padding: 6px 14px; }
 #interactBox button.task-act { border-color: var(--accent); background: rgba(58,44,20,.95); }
+
+/* 送餐選項 */
+.choice { display: flex; flex-wrap: wrap; gap: 6px; }
+.choice button { padding: 6px 12px; border-radius: 999px; font-size: 13px; }
+.choice button small { color: var(--muted); }
+.choice button.on { background: #3a2c14; border-color: var(--accent); color: var(--accent); }
