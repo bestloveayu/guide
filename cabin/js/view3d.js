@@ -539,9 +539,11 @@ export class View3D {
       const s = seats.find((z) => z.id === p.seat);
       if (!s) return;
       const g = new THREE.Group();
-      const body = new THREE.Mesh(passengerGeometry(p), PAX_MAT);
-      body.castShadow = true; body.receiveShadow = true;
-      g.add(body);
+      const pm = passengerGeometry(p);
+      const body = new THREE.Mesh(pm.body, PAX_MAT);
+      const face = new THREE.Mesh(pm.face, pm.faceMat);
+      body.castShadow = true; body.receiveShadow = true; face.castShadow = true;
+      g.add(body, face);
       const ind = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.016, 8, 24), new THREE.MeshBasicMaterial({ color: 0xf5c542, toneMapped: false }));
       ind.rotation.x = Math.PI / 2; ind.position.set(0.12, p.type === 'child' ? 1.2 : 1.62, 0); ind.visible = false;
       g.add(ind);

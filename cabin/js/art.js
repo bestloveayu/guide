@@ -228,6 +228,137 @@ export function seatAsset(cls, w, d, opts = {}) {
   return { geometry: mergeGeometries(geos, true), materials: mats };
 }
 
+// ---------- 寫實頭部：雕塑網格 + 手繪臉部貼圖（兩者使用同一組 UV 座標，五官位置精準對齊） ----------
+// 臉部中心在 u=0.5（+x 方向），各五官的 (du, v) 位置
+const F = { eyeDu: 0.069, eyeV: 0.545, browV: 0.6, noseV: 0.445, mouthV: 0.372, chinV: 0.29 };
+const gauss = (a, b) => Math.exp(-(a * a + b * b));
+let HEAD_GEO = null;
+// 單位頭部（臉朝 +x），尺寸約：寬 0.16、高 0.232、深 0.196 m
+export function headGeometry() {
+  if (HEAD_GEO) return HEAD_GEO;
+  const g = new THREE.SphereGeometry(0.1, 72, 54);
+  const pos = g.attributes.position, uv = g.attributes.uv;
+  const v3 = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    const u = uv.getX(i), v = uv.getY(i);
+    const du = u - 0.5, adu = Math.abs(du);
+    let d = 0;
+    if (adu < 0.25) {
+      d += 0.13 * gauss(du / 0.018, (v - 0.485) / 0.06) * (v < 0.55 ? 1 : 0.6);   // 鼻樑
+      d += 0.07 * gauss(du / 0.026, (v - F.noseV) / 0.022);                       // 鼻頭
+      d += 0.025 * gauss((adu - 0.03) / 0.015, (v - 0.448) / 0.015);              // 鼻翼
+      d -= 0.06 * gauss((adu - F.eyeDu) / 0.03, (v - F.eyeV) / 0.026);           // 眼窩
+      d += 0.035 * gauss(du / 0.13, (v - F.browV) / 0.022);                      // 眉骨
+      d += 0.03 * gauss((adu - 0.105) / 0.04, (v - 0.495) / 0.04);                // 顴骨
+      d += 0.03 * gauss(du / 0.035, (v - 0.385) / 0.012);                         // 上唇
+      d += 0.035 * gauss(du / 0.03, (v - 0.355) / 0.014);                         // 下唇
+      d -= 0.015 * gauss(du / 0.03, (v - 0.33) / 0.012);                          // 唇下凹
+      d += 0.05 * gauss(du / 0.045, (v - F.chinV) / 0.035);                       // 下巴
+      d -= 0.025 * gauss((adu - 0.075) / 0.03, (v - 0.4) / 0.035);                // 臉頰凹
+    }
+    v3.fromBufferAttribute(pos, i).multiplyScalar(1 + d);
+    // 下顎收窄、後腦較飽滿
+    if (v < 0.45) { const k = 1 - 0.42 * (0.45 - v); v3.z *= k; if (v3.x < 0) v3.x *= 1 - 0.3 * (0.45 - v); }
+    if (v3.x < 0) v3.x *= 1.06;
+    pos.setXYZ(i, v3.x * 0.98, v3.y * 1.16, v3.z * 0.8);
+  }
+  g.computeVertexNormals();
+  HEAD_GEO = g;
+  return g;
+}
+
+const FACE_CACHE = new Map();
+// 臉部貼圖：512×256（u 360°、v 180°），opts: { female, elder, stubble, makeup, brow, eye, monolid }
+export function faceMaterial(skin, opts = {}) {
+  const key = skin + JSON.stringify(opts);
+  if (FACE_CACHE.has(key)) return FACE_CACHE.get(key);
+  const W = 512, H = 256;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const X = (du) => (0.5 + du) * W, Y = (v) => (1 - v) * H;
+  const base = new THREE.Color(skin);
+  const css = (col, a = 1) => `rgba(${Math.round(col.r * 255)},${Math.round(col.g * 255)},${Math.round(col.b * 255)},${a})`;
+  const tone = (k) => base.clone().multiplyScalar(k);
+  g.fillStyle = skin; g.fillRect(0, 0, W, H);
+  // 膚質雜訊
+  const rr = rng(hash(key));
+  for (let i = 0; i < 2600; i++) { g.fillStyle = rr() > 0.5 ? 'rgba(255,240,230,0.035)' : 'rgba(90,40,30,0.035)'; g.fillRect(rr() * W, rr() * H, 1.5, 1.5); }
+  const radial = (x, y, r, col, sx = 1, sy = 1) => { g.save(); g.translate(x, y); g.scale(sx, sy); const gr = g.createRadialGradient(0, 0, 0, 0, 0, r); gr.addColorStop(0, col); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.beginPath(); g.arc(0, 0, r, 0, 7); g.fill(); g.restore(); };
+  const cx = X(0);
+  // 臉部光影：額頭/鼻樑略亮、眼窩與鼻側略暗、臉頰紅潤
+  radial(cx, Y(0.63), 60, css(tone(1.08), 0.5), 1.4, 0.6);
+  radial(cx, Y(0.49), 14, css(tone(1.1), 0.5), 0.6, 2.2);
+  for (const s of [-1, 1]) {
+    radial(X(s * F.eyeDu), Y(F.eyeV) + 1, 26, css(tone(0.78), 0.42), 1.25, 0.8);           // 眼窩陰影
+    radial(X(s * 0.022), Y(0.49), 16, css(tone(0.85), 0.3), 0.5, 1.6);                    // 鼻側
+    radial(X(s * 0.1), Y(0.44), 30, opts.makeup ? 'rgba(214,96,104,0.22)' : 'rgba(200,100,90,0.12)', 1.2, 0.9); // 臉頰
+  }
+  radial(cx, Y(0.315), 22, css(tone(0.85), 0.35), 1.3, 0.6);                               // 唇下陰影
+  radial(cx, Y(0.27), 50, css(tone(0.88), 0.25), 1.6, 0.8);                                // 下巴下緣
+  if (opts.stubble) { g.save(); for (let i = 0; i < 2600; i++) { const a = rr() * Math.PI, rad = 30 + rr() * 26; const x = cx + Math.cos(a) * rad * 1.6, y = Y(0.42) + Math.sin(a) * rad * 0.9; if (y > Y(0.4)) { g.fillStyle = 'rgba(40,36,40,0.13)'; g.fillRect(x, y, 1.2, 1.2); } } g.restore(); radial(cx, Y(0.4), 16, 'rgba(50,46,50,0.18)', 1.6, 0.35); }
+  // 眼睛
+  for (const s of [-1, 1]) {
+    const ex = X(s * F.eyeDu), ey = Y(F.eyeV);
+    const ew = 16, top = opts.monolid ? 4.6 : 6, bot = 4;
+    const outer = ex + s * ew, inner = ex - s * ew;
+    // 上眼皮摺痕
+    if (!opts.monolid) { g.strokeStyle = css(tone(0.7), 0.6); g.lineWidth = 1.2; g.beginPath(); g.moveTo(inner, ey - 2); g.quadraticCurveTo(ex, ey - top - 6, outer + s * 1, ey - 3); g.stroke(); }
+    if (opts.makeup) radial(ex, ey - 4, 16, 'rgba(120,80,90,0.32)', 1.3, 0.6);
+    const almond = () => { g.beginPath(); g.moveTo(inner, ey); g.bezierCurveTo(inner + s * 6, ey - top, outer - s * 8, ey - top - 1, outer, ey - 1); g.bezierCurveTo(outer - s * 7, ey + bot, inner + s * 6, ey + bot, inner, ey); g.closePath(); };
+    almond(); g.fillStyle = '#ece6de'; g.fill();
+    g.save(); almond(); g.clip();
+    radial(ex, ey, 14, 'rgba(120,100,95,0.35)', 1, 0.5);
+    const ir = g.createRadialGradient(ex, ey, 1, ex, ey, 7);
+    ir.addColorStop(0, opts.eye || '#2a1a12'); ir.addColorStop(0.8, opts.eye ? shadeHex(opts.eye, 0.7) : '#3d271b'); ir.addColorStop(1, '#140d0a');
+    g.fillStyle = ir; g.beginPath(); g.ellipse(ex + s * 0.5, ey - 0.5, 7.2, 6, 0, 0, 7); g.fill();
+    g.fillStyle = '#060404'; g.beginPath(); g.ellipse(ex + s * 0.5, ey - 0.5, 3.2, 2.8, 0, 0, 7); g.fill();
+    g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(inner - 20, ey - top - 2, 60, 3.2); // 上眼皮投影
+    g.restore();
+    g.fillStyle = 'rgba(255,255,255,0.9)'; g.beginPath(); g.arc(ex + s * 2.4, ey - 2.6, 1.3, 0, 7); g.fill();
+    // 上睫毛線
+    g.strokeStyle = '#140e0c'; g.lineWidth = opts.female ? 2.8 : 2; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(inner, ey); g.bezierCurveTo(inner + s * 6, ey - top, outer - s * 8, ey - top - 1, outer, ey - 1); if (opts.female) g.lineTo(outer + s * 3, ey - 3); g.stroke();
+    g.strokeStyle = css(tone(0.6), 0.5); g.lineWidth = 0.9;
+    g.beginPath(); g.moveTo(inner + s * 2, ey + 1); g.bezierCurveTo(inner + s * 6, ey + bot, outer - s * 7, ey + bot, outer, ey - 1); g.stroke();
+    // 眉毛：短筆觸
+    const by = Y(F.browV) + 2;
+    for (let k = 0; k < 34; k++) {
+      const t = k / 33, x = inner - s * 2 + s * t * (ew * 2 + 4), arch = Math.sin(t * Math.PI * 0.85) * 4;
+      const thick = (opts.female ? 2.6 : 3.8) * (1 - t * 0.55);
+      g.strokeStyle = opts.brow || '#2a1f18'; g.globalAlpha = 0.75; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(x, by - arch + thick * 0.5); g.lineTo(x + s * 2.2, by - arch - thick * 0.5); g.stroke();
+    }
+    g.globalAlpha = 1;
+    if (opts.elder) { g.strokeStyle = css(tone(0.72), 0.5); g.lineWidth = 0.9; for (let k = 0; k < 3; k++) { g.beginPath(); g.moveTo(outer + s * 3, ey - 3 + k * 3); g.lineTo(outer + s * 9, ey - 5 + k * 4); g.stroke(); } }
+  }
+  // 鼻子：鼻孔、鼻翼陰影、鼻頭高光
+  const ny = Y(F.noseV);
+  for (const s of [-1, 1]) {
+    g.fillStyle = 'rgba(60,30,25,0.55)'; g.beginPath(); g.ellipse(cx + s * 6, ny + 3, 3.4, 1.8, s * 0.3, 0, 7); g.fill();
+    g.strokeStyle = css(tone(0.7), 0.5); g.lineWidth = 1.2; g.beginPath(); g.arc(cx + s * 9, ny, 5, s > 0 ? -0.6 : Math.PI - 0.6 + 1.2, s > 0 ? 1.2 : Math.PI + 0.6); g.stroke();
+  }
+  radial(cx, ny - 3, 6, 'rgba(255,245,235,0.35)');
+  radial(cx, ny + 6, 12, css(tone(0.75), 0.4), 1.3, 0.4);
+  // 嘴巴
+  const my = Y(F.mouthV), mw = 15;
+  const lip = opts.makeup ? '#a8394a' : '#' + new THREE.Color(skin).lerp(new THREE.Color('#a2504c'), 0.55).getHexString();
+  g.fillStyle = lip;
+  g.beginPath(); g.moveTo(cx - mw, my); g.quadraticCurveTo(cx - 6, my - 6, cx - 2, my - 4.4); g.quadraticCurveTo(cx, my - 3.2, cx + 2, my - 4.4); g.quadraticCurveTo(cx + 6, my - 6, cx + mw, my); g.quadraticCurveTo(cx, my + 1.2, cx - mw, my); g.fill();
+  g.fillStyle = shadeHex(lip, 1.08);
+  g.beginPath(); g.moveTo(cx - mw + 1, my + 0.5); g.quadraticCurveTo(cx, my + 9, cx + mw - 1, my + 0.5); g.quadraticCurveTo(cx, my + 2, cx - mw + 1, my + 0.5); g.fill();
+  g.strokeStyle = 'rgba(60,20,20,0.75)'; g.lineWidth = 1.4; g.beginPath(); g.moveTo(cx - mw, my); g.quadraticCurveTo(cx, my + 1.6, cx + mw, my); g.stroke();
+  radial(cx, my + 4, 5, 'rgba(255,240,235,0.3)', 1.6, 0.5);
+  if (opts.elder) {
+    g.strokeStyle = css(tone(0.72), 0.55); g.lineWidth = 1.1;
+    for (const s of [-1, 1]) { g.beginPath(); g.moveTo(cx + s * 13, ny + 2); g.quadraticCurveTo(cx + s * 20, my - 6, cx + s * 18, my + 4); g.stroke(); }
+    for (let k = 0; k < 3; k++) { g.beginPath(); g.moveTo(cx - 30, Y(0.66) + k * 5); g.quadraticCurveTo(cx, Y(0.67) + k * 5, cx + 30, Y(0.66) + k * 5); g.stroke(); }
+  }
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  const m = new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.58, sheen: 0.35, sheenRoughness: 0.5, sheenColor: new THREE.Color('#ffd2bd') });
+  FACE_CACHE.set(key, m);
+  return m;
+}
+
 // ---------- 人物：頂點色 + 平滑法線 ----------
 function colored(geo, color, matrix) {
   const g = ni(geo).clone();
@@ -288,15 +419,7 @@ export function passengerGeometry(p) {
   body.push(colored(cap(0.046, 0.07, 12), skin, M(0.16, 1.17, 0)));
   // 頭部（以頸部為樞紐可低頭）
   const HY = 1.32, HX = 0.15;
-  head.push(colored(sph(0.1, 28, 20), skin, M(HX, HY, 0, 0, 0, 0, 0.98, 1.16, 0.8)));
-  head.push(colored(sph(0.05, 14, 10), skin, M(HX - 0.03, HY - 0.075, 0, 0, 0, 0, 1.1, 0.7, 1.15))); // 下顎
-  head.push(colored(cap(0.012, 0.03, 8), shadeHex(skin, 0.95), M(HX - 0.098, HY - 0.005, 0, 0, 0, 0.15)));  // 鼻
-  for (const s of [-1, 1]) {
-    head.push(colored(sph(0.011, 10, 8), '#1c1614', M(HX - 0.083, HY + 0.02, s * 0.034)));
-    head.push(colored(new RoundedBoxGeometry(0.008, 0.007, 0.036, 1, 0.003), shadeHex(hair, 0.9), M(HX - 0.088, HY + 0.045, s * 0.035)));
-    head.push(colored(sph(0.022, 10, 8), skin, M(HX + 0.005, HY - 0.0, s * 0.078, 0, 0, 0, 0.6, 1.2, 0.5)));
-  }
-  head.push(colored(cap(0.007, 0.026, 6), '#a85d55', M(HX - 0.09, HY - 0.045, 0, Math.PI / 2, 0, 0)));
+  for (const s of [-1, 1]) head.push(colored(sph(0.022, 12, 10), shadeHex(skin, 0.96), M(HX + 0.005, HY - 0.005, s * 0.079, 0, 0, 0, 0.55, 1.25, 0.45)));  // 耳朵
   // 頭髮：頂部 + 後腦完整覆蓋，臉部留空
   const HR = 0.108;
   const front = 1.3;
@@ -304,22 +427,25 @@ export function passengerGeometry(p) {
   head.push(colored(new THREE.SphereGeometry(HR, 28, 16, 0, Math.PI * 2, 0, Math.PI * 0.32), hair, M(HX + 0.004, HY + 0.016, 0, 0, 0, 0.12, 1.0, 1.12, 0.84)));
   const backLen = style === 3 ? 0.55 : style === 0 ? 0.6 : 0.68;
   head.push(colored(new THREE.SphereGeometry(HR + 0.003, 24, 14, Math.PI - 0.78, 1.56, Math.PI * 0.3, Math.PI * (backLen - 0.3)), hair, M(HX + 0.01, HY + 0.01, 0, 0, 0, 0, 1.0, 1.15, 0.86)));
-  if (style === 1) head.push(colored(new THREE.CylinderGeometry(0.1, 0.11, 0.12, 22, 1, true, -Math.PI / 2 - 1.2, Math.PI + 2.4), hair, M(HX + 0.015, HY - 0.08, 0, 0, 0, 0, 0.95, 1, 0.92)));
+  if (style === 1) head.push(colored(new THREE.CylinderGeometry(0.1, 0.108, 0.13, 28, 1, true, -Math.PI / 2 + 1.15, Math.PI * 2 - 2.3), hair, M(HX + 0.01, HY - 0.07, 0, 0, 0, 0, 1.12, 1, 0.94)));
   if (style === 2) { head.push(colored(cap(0.04, 0.12, 10), hair, M(HX + 0.12, HY - 0.06, 0, 0, 0, 0.35))); head.push(colored(sph(0.03, 10, 8), shadeHex(hair, 0.8), M(HX + 0.11, HY + 0.02, 0))); }
   if (glasses) {
-    for (const s of [-1, 1]) head.push(colored(new THREE.TorusGeometry(0.022, 0.0035, 6, 18), '#24262b', M(HX - 0.092, HY + 0.02, s * 0.034, 0, Math.PI / 2, 0)));
-    head.push(colored(cap(0.003, 0.02, 4), '#24262b', M(HX - 0.094, HY + 0.022, 0, Math.PI / 2, 0, 0)));
+    for (const s of [-1, 1]) head.push(colored(new THREE.TorusGeometry(0.0175, 0.0024, 6, 22), '#24262b', M(HX - 0.1, HY + 0.017, s * 0.033, 0, Math.PI / 2, 0)));
+    head.push(colored(cap(0.002, 0.012, 4), '#24262b', M(HX - 0.104, HY + 0.02, 0, Math.PI / 2, 0, 0)));
   }
   const hg = mergeGeometries(head, false);
-  hg.translate(-0.16, -1.2, 0);
-  hg.rotateZ(reading ? 0.38 : (r() - 0.5) * 0.12); // 低頭
-  hg.rotateY((r() - 0.5) * 0.35);
-  hg.translate(0.16, 1.2, 0);
+  const face = headGeometry().clone();
+  face.rotateY(Math.PI); // 臉朝 -x
+  face.translate(HX, HY, 0);
+  const tilt = reading ? 0.38 : (r() - 0.5) * 0.12, turn = (r() - 0.5) * 0.35;
+  for (const gg of [hg, face]) { gg.translate(-0.16, -1.2, 0); gg.rotateZ(tilt); gg.rotateY(turn); gg.translate(0.16, 1.2, 0); }
   const extras = [];
   if (p.type === 'vip') extras.push(colored(new RoundedBoxGeometry(0.02, 0.22, 0.05, 2, 0.008), '#a8842b', M(0.04, 0.98, 0, 0, 0, -0.16)));
   const g = mergeGeometries([...body, hg, ...extras], false);
-  if (p.type === 'child') { g.translate(0.1, 0, 0); g.scale(0.7, 0.7, 0.7); g.translate(-0.1, 0.12, 0); }
-  return g;
+  const female = style === 1 || style === 2;
+  const faceOpts = { female, elder: p.type === 'elder', stubble: !female && p.type !== 'child' && r() < 0.35, makeup: female && r() < 0.6, brow: shadeHex(hair, 0.85), monolid: r() < 0.55 };
+  if (p.type === 'child') for (const gg of [g, face]) { gg.translate(0.1, 0, 0); gg.scale(0.7, 0.7, 0.7); gg.translate(-0.1, 0.12, 0); }
+  return { body: g, face, faceMat: faceMaterial(skin, faceOpts) };
 }
 
 // 空服員（可動畫，面向 +x）
@@ -372,16 +498,11 @@ export function makeCrew(u) {
     g.add(pivot); arms.push(pivot);
   }
   const neck = new THREE.Mesh(cap(0.042, 0.06, 12), skinM); neck.position.y = 1.6; g.add(neck);
-  const head = new THREE.Mesh(sph(0.112, 28, 20), skinM); head.position.y = 1.74; head.scale.set(0.95, 1.13, 0.88); g.add(head);
-  const nose = new THREE.Mesh(sph(0.018, 10, 8), skinM); nose.position.set(0.105, 1.73, 0); nose.scale.set(1, 1.3, 0.8); g.add(nose);
-  for (const s of [-1, 1]) {
-    const eye = new THREE.Mesh(sph(0.013, 10, 8), mat('#1b1512', { roughness: 0.1, clearcoat: 1 })); eye.position.set(0.094, 1.765, s * 0.038); g.add(eye);
-    const brow = new THREE.Mesh(new RoundedBoxGeometry(0.01, 0.008, 0.04, 1, 0.003), hairM); brow.position.set(0.1, 1.795, s * 0.04); g.add(brow);
-    const ear = new THREE.Mesh(sph(0.02, 8, 6), skinM); ear.position.set(0.0, 1.74, s * 0.098); ear.scale.set(0.6, 1.2, 0.5); g.add(ear);
-  }
-  const lips = new THREE.Mesh(cap(0.008, 0.03, 8), mat('#b8574f', { roughness: 0.35 })); lips.rotation.x = Math.PI / 2; lips.position.set(0.1, 1.69, 0); g.add(lips);
-  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.122, 28, 16, 0, Math.PI * 2, 0, Math.PI * 0.6), hairM);
-  hair.position.set(-0.012, 1.765, 0); hair.rotation.z = 0.32; hair.scale.set(1, 1.08, 0.97); g.add(hair);
+  const head = new THREE.Mesh(headGeometry(), faceMaterial(u.skin, { female: !pants, makeup: !pants, brow: shadeHex(u.hair, 0.85), monolid: false }));
+  head.position.y = 1.725; head.scale.setScalar(1.05); g.add(head);
+  for (const s of [-1, 1]) { const ear = new THREE.Mesh(sph(0.022, 10, 8), skinM); ear.position.set(-0.005, 1.735, s * 0.084); ear.scale.set(0.55, 1.25, 0.45); g.add(ear); }
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.115, 32, 18, 0, Math.PI * 2, 0, Math.PI * 0.6), hairM);
+  hair.position.set(-0.016, 1.77, 0); hair.rotation.z = 0.36; hair.scale.set(1, 1.1, 0.88); g.add(hair);
   if (!pants) { const bun = new THREE.Mesh(sph(0.065, 18, 14), hairM); bun.position.set(-0.13, 1.71, 0); g.add(bun); }
   if (u.hat) {
     const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.098, 0.112, 0.085, 28), cloth(u.jacket)); hat.position.set(0.02, 1.91, 0); hat.rotation.z = -0.12; g.add(hat);
@@ -395,7 +516,7 @@ export function makeCrew(u) {
     const sw = Math.sin(t * 8.5) * 0.5 * blend;
     legs[0].rotation.z = seated ? 1.45 : sw; legs[1].rotation.z = seated ? 1.45 : -sw;
     arms[0].rotation.z = seated ? 0.45 : -sw * 0.7; arms[1].rotation.z = seated ? 0.45 : sw * 0.7;
-    head.position.y = 1.74 + (seated ? 0 : Math.abs(Math.cos(t * 8.5)) * 0.012 * blend);
+    head.position.y = 1.725 + (seated ? 0 : Math.abs(Math.cos(t * 8.5)) * 0.012 * blend);
   };
   return g;
 }
