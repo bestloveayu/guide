@@ -4,15 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>虛擬機艙編輯器</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@500;700&display=swap">
   <link rel="stylesheet" href="cabin.css">
   <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
 </head>
 <body>
   <header id="topbar">
-    <div class="brand">✈ 虛擬機艙 <small>空服員訓練模擬</small></div>
+    <div class="brand">虛擬機艙 <small>空服員訓練模擬</small></div>
     <nav class="seg" id="modeSeg">
-      <button data-mode="edit" class="on">🛠 編輯器</button>
-      <button data-mode="play">🛫 模擬飛行</button>
+      <button data-mode="edit" class="on">編輯器</button>
+      <button data-mode="play">模擬飛行</button>
     </nav>
     <nav class="seg" id="viewSeg">
       <button data-view="2d" class="on">平面圖</button>

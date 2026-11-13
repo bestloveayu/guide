@@ -56,9 +56,9 @@ export const FIXTURE_TYPES = {
 };
 
 export const SEAT_CLASS = {
-  J: { name: '商務艙', color: '#6b4fa0' },
-  W: { name: '豪華經濟艙', color: '#2f7f8f' },
-  Y: { name: '經濟艙', color: '#3a6ea5' },
+  J: { name: '商務艙', color: '#6a5596' },
+  W: { name: '豪華經濟艙', color: '#2f8090' },
+  Y: { name: '經濟艙', color: '#3b64a0' },
 };
 
 export const AIRLINES = [

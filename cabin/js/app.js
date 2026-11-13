@@ -541,7 +541,7 @@ class App {
     this.setView('orbit');
     const w = this.walker;
     this.v3.orbit.target.set(w.x, 1, -w.y);
-    this.v3.orbit.dist = 4; this.v3.orbit.pitch = 0.25; this.v3.orbit.manual = true;
+    this.v3.orbit.dist = 4.2; this.v3.orbit.pitch = 0.42; this.v3.orbit.yaw = -2.6; this.v3.orbit.manual = true;
     this.previewing = true;
   }
 
@@ -677,15 +677,17 @@ class App {
     const sim = this.sim;
     // 階段列
     const pb = $('#phaseBar');
-    if (!pb.children.length) PHASES.forEach((p) => pb.append(h('div', {}, p.name, h('i'))));
-    [...pb.children].forEach((d, i) => {
+    if (!pb.children.length) { PHASES.forEach((p) => pb.append(h('div', {}, p.name, h('i')))); pb.append(h('span', { class: 'plane' }, '✈')); }
+    pb.querySelector('.plane').style.left = `calc(6px + (100% - 12px) * ${sim.progress().toFixed(4)})`;
+    [...pb.querySelectorAll('div')].forEach((d, i) => {
       d.className = i < sim.phaseIdx ? 'past' : i === sim.phaseIdx ? 'cur' : '';
       d.querySelector('i').style.width = i === sim.phaseIdx ? `${(sim.phaseT / sim.phase.dur) * 100}%` : '';
     });
     const e = sim.env;
-    $('#envBox').innerHTML = `高度 <b>${Math.round(e.alt).toLocaleString()}</b> ft・速度 <b>${Math.max(0, Math.round(e.speed))}</b> kt<br>`
-      + `<span class="sign ${e.seatbelt ? 'on' : ''}">🔔 繫緊安全帶</span> ${e.doorsOpen ? '🚪 艙門開啟' : '🔒 艙門關閉'}${e.turbulence > 0 ? ' <b style="color:var(--warn)">⚠ 亂流</b>' : ''}`
-      + `<br>航班時間 ${fmtT(sim.totalT)}${sim.player.seated ? '・<b style="color:var(--good)">已就座</b>' : ''}${sim.paused ? '・<b>暫停中</b>' : ''}`;
+    const ins = (label, val, unit) => `<div class="ins">${label}<b>${val}</b><small>${unit}</small></div>`;
+    $('#envBox').innerHTML = ins('高度 ALT', Math.round(e.alt).toLocaleString(), 'ft') + ins('空速 IAS', Math.max(0, Math.round(e.speed)), 'kt') + ins('航班時間', fmtT(sim.totalT), sim.paused ? '暫停中' : `×${sim.timeScale}`)
+      + `<div class="chips"><span class="sign ${e.seatbelt ? 'on' : ''}">繫緊安全帶</span><span class="sign ${e.doorsOpen ? '' : 'good'}">${e.doorsOpen ? '艙門開啟' : '艙門關閉'}</span>`
+      + `${e.turbulence > 0 ? '<span class="sign bad">亂流</span>' : ''}${sim.player.seated ? '<span class="sign good">已就座</span>' : ''}</div>`;
     // 互動按鈕
     const ib = $('#interactBox');
     const its = sim.modalOpen ? [] : sim.interactables();
@@ -749,7 +751,7 @@ class App {
 
   toast(speaker, text, tone = 'info') {
     const box = $('#toasts');
-    const el = h('div', { class: 'toast ' + tone }, h('b', {}, speaker), text);
+    const el = h('div', { class: 'toast ' + tone, 'data-ini': String(speaker).replace(/^(學姊|座艙長|客艙督導)\s*/, '').slice(0, 1) }, h('b', {}, speaker), h('span', {}, text));
     box.append(el);
     while (box.children.length > 4) box.firstChild.remove();
     setTimeout(() => el.remove(), 6000);
