@@ -174,7 +174,8 @@ function obstacleRects(ac) {
 // 圓形 (x, y, r) 是否與任何障礙或機身側牆重疊
 export function collides(grid, x, y, r = BODY_R) {
   const W = grid.W;
-  if (y - r < -W / 2 + 0.05 || y + r > W / 2 - 0.05 || x - r < 0 || x + r > grid.L) return true;
+  // 側牆在頭部高度向內收（約 0.17 m），留出頭部空間，避免第一人稱鏡頭貼牆
+  if (y - r < -W / 2 + 0.22 || y + r > W / 2 - 0.22 || x - r < 0 || x + r > grid.L) return true;
   for (const q of grid.rects) {
     const dx = Math.max(q.x0 - x, 0, x - q.x1), dy = Math.max(q.y0 - y, 0, y - q.y1);
     if (dx * dx + dy * dy < r * r) return true;

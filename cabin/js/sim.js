@@ -99,7 +99,7 @@ export class Flight {
   }
   moveManual(dx, dy) { // 第一人稱移動（公尺），碰到座位或牆面時沿表面滑動
     if (dx || dy) this.standUp();
-    this.player.path = [];
+    if (dx || dy) this.player.path = [];
     slideMove(this.grid, this.player, dx, dy);
     if (dx || dy) this.player.heading = Math.atan2(dy, dx);
   }

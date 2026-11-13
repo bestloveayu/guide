@@ -1,6 +1,6 @@
 // 主程式：狀態、介面面板、模式切換、模擬流程
 import { PHASES, RANKS, rankOf, PRIORITY, PAX_TYPES, FIXTURE_TYPES, SEAT_CLASS, AIRLINES, AIRCRAFT_SPECS, ANNOUNCEMENTS, phaseName, defaultScenario } from './data.js';
-import { buildTemplate, buildFromSpec, findSeat, rowsOf, removeRows, insertRowAfter, generateInRect, newId, buildGrid, walkable, approachPoint, findFixture, slideMove } from './layout.js';
+import { buildTemplate, buildFromSpec, findSeat, rowsOf, removeRows, insertRowAfter, generateInRect, newId, buildGrid, walkable, approachPoint, findFixture, slideMove, findPath } from './layout.js';
 import { load, save, download, readFile, resetAll } from './store.js';
 import { View2D } from './view2d.js';
 import { View3D } from './view3d.js';
@@ -116,8 +116,8 @@ class App {
   updateHint() {
     const map = {
       '2d': this.mode === 'play' ? '點擊地板或座位移動角色｜滾輪縮放、右鍵拖曳平移｜E 互動｜P 暫停' : '點選座位、Shift 多選、拖曳框選；點排號選整排｜滾輪縮放、右鍵拖曳平移｜Delete 移除座位',
-      orbit: this.mode === 'play' ? '左鍵拖曳旋轉、右鍵/Shift 拖曳平移、滾輪縮放｜點擊地板移動｜E 互動' : '左鍵拖曳旋轉、右鍵/Shift 拖曳平移、滾輪縮放',
-      fp: '點擊畫面鎖定滑鼠｜WASD 移動、Shift 快走、滑鼠轉頭｜Esc 釋放滑鼠｜E 互動',
+      orbit: this.mode === 'play' ? '左鍵拖曳旋轉、右鍵/Shift 拖曳平移、滾輪縮放｜點人物對話、點地板移動｜E 互動' : '左鍵拖曳旋轉、右鍵/Shift 拖曳平移、滾輪縮放',
+      fp: '按住左鍵拖曳轉動視角｜點人物對話、點地板走過去｜WASD 移動、Shift 快走｜E 互動',
     };
     $('#hint').textContent = map[this.view];
   }
@@ -144,13 +144,21 @@ class App {
       const mv = this.v3.fpMove(dt);
       if (mv) sim.moveManual(mv.dx, mv.dy);
       sim.update(dt);
+      // 點選旅客後自動走過去，抵達時開始互動
+      const pt = this.pendingTask;
+      if (pt && !sim.player.path.length) { this.pendingTask = null; if (pt.status === 'active' && sim.inRange(pt) && !sim.modalOpen) sim.interact(pt); }
       this.updateHud(dt);
     } else if (this.walker && this.view === 'fp') {
       const mv = this.v3.fpMove(dt);
       if (mv) {
+        this.walker.path = [];
         slideMove(this.walker.grid, this.walker, mv.dx, mv.dy);
         this.walker.heading = Math.atan2(mv.dy, mv.dx);
       }
+    }
+    if (!sim && this.walker && this.walker.path && this.walker.path.length) {
+      const w = this.walker; let mv = 1.6 * dt;
+      while (mv > 0 && w.path.length) { const t = w.path[0], dx = t.x - w.x, dy = t.y - w.y, d = Math.hypot(dx, dy); if (d < 1e-3) { w.path.shift(); continue; } w.heading = Math.atan2(dy, dx); if (d <= mv) { w.x = t.x; w.y = t.y; w.path.shift(); mv -= d; } else { w.x += dx / d * mv; w.y += dy / d * mv; mv = 0; } }
     }
     const walker = sim ? sim.player : (this.view === 'fp' || this.tab === 'crew') ? this.walker : null;
     if (this.view === '2d') this.v2.draw(sim);
@@ -672,8 +680,34 @@ class App {
     $('#btnPause').textContent = this.sim.paused ? '▶ 繼續' : '⏸ 暫停';
   }
 
+  // 3D 視角中的點選（人物 / 地板）
+  onPick(h) {
+    if (h.type === 'floor') return this.onPlayClick(h);
+    if (h.type === 'pax') return this.onPersonClick(h.seat);
+    if (h.type === 'npc' && this.sim) {
+      const n = this.sim.npcs.find((z) => z.id === h.id);
+      if (n) this.toast(n.name, n.task ? `我正在處理「${n.task.def.title}」。` : this.sim.rank >= 3 ? '座艙長，有什麼需要我協助的嗎？可以在任務卡上指派給我。' : '有問題隨時問我喔！');
+    }
+  }
+
+  onPersonClick(seat) {
+    const p = this.scenario().passengers.find((x) => x.seat === seat);
+    if (this.mode !== 'play' || !this.sim || this.sim.ended) { if (p) this.editPassenger(seat); return; }
+    const sim = this.sim;
+    const t = sim.activeTasks().find((k) => k.status === 'active' && k.def.target && k.def.target.seat === seat);
+    if (t) {
+      if (sim.inRange(t)) sim.interact(t);
+      else { sim.goTo(t); this.pendingTask = t; this.toast('系統', `前往 ${seat}，抵達後會自動開始對話。`); }
+      return;
+    }
+    const mood = sim.mood[seat] ?? 70;
+    this.toast(p ? `${p.name}（${seat}）` : `旅客（${seat}）`, mood >= 70 ? '謝謝，我目前沒有什麼需要。' : mood >= 40 ? '嗯……還好，有事我再按服務鈴。' : '（看起來心情不太好，也許該關心一下）');
+  }
+
   onPlayClick(w) {
+    if (this.mode === 'edit' && this.walker && this.view === 'fp') { this.walker.path = findPath(this.walker.grid, this.walker, w); return; }
     if (this.mode !== 'play' || !this.sim || this.sim.ended) return;
+    this.pendingTask = null;
     // 點到座位旁：走到該排走道；否則走到點擊位置
     const ac = this.aircraft();
     const s = ac.seats.find((z) => !z.removed && Math.abs(w.x - z.x) <= z.d / 2 + 0.05 && Math.abs(w.y - z.y) <= z.w / 2 + 0.05);

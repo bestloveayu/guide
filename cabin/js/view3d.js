@@ -298,7 +298,17 @@ export class View3D {
     edges.slice(0, 4).forEach((yy) => { const st = new THREE.Mesh(new THREE.BoxGeometry(L - 6, 0.004, 0.012), pathMat); st.position.set(L / 2 + 0.5, 0.006, -yy); this.cabin.add(st); });
 
     // ===== 客艙內裝（依照片：側牆內襯板、圓形窗框凹槽、大型行李櫃、間接照明天花板） =====
-    const binX0 = 2.4, binX1 = L - 1.6;
+    // 行李櫃區段：由座位排的位置推算（間距過大處斷開，例如門區、廚房）
+    const rowList = [...new Map(activeSeats(ac).map((st) => [st.row, st])).values()].sort((a, b) => a.x - b.x);
+    const binZones = [];
+    rowList.forEach((rw) => {
+      const half = (rw.pitch || 0.8) / 2;
+      const last = binZones[binZones.length - 1];
+      if (last && rw.x - half - last[1] < 0.9) last[1] = rw.x + half + 0.05;
+      else binZones.push([rw.x - half - 0.05, rw.x + half + 0.05]);
+    });
+    this.binZones = binZones; this.binInner = R - 0.74;
+    const binX0 = binZones.length ? binZones[0][0] : 2.4, binX1 = binZones.length ? binZones[binZones.length - 1][1] : L - 1.6;
     // 側牆貼圖：每兩扇窗一道內襯板接縫、下方腳踢板回風格柵
     const wallTex = canvasTex(256, 512, (g) => {
       const gr = g.createLinearGradient(0, 0, 0, 512); gr.addColorStop(0, '#e6e6e3'); gr.addColorStop(1, '#d6d7d4');
@@ -327,27 +337,36 @@ export class View3D {
       // 側牆（下方腳踢板 + 弧形內襯板）
       this.cabin.add(new THREE.Mesh(sweep([[R, 0], [R + 0.015, 0.25]], 0, L, s), kick));
       this.cabin.add(new THREE.Mesh(sweep(smoothProfile([[R + 0.015, 0.25], [R + 0.05, 0.75], [R + 0.03, 1.15], [R - 0.05, 1.45], [R - 0.17, 1.64]], 8), 0, L, s), wall));
-      // 行李櫃：底面（PSU 所在）→ 下緣把手唇邊 → 弧形櫃門 → 頂部
       const ix = R - 0.74; // 行李櫃內緣（離中線距離）
-      const under = new THREE.Mesh(sweep([[R - 0.17, 1.64], [ix + 0.03, 1.64]], binX0, binX1, s), binUnder); under.userData.ceiling = true; this.cabin.add(under);
-      const lip = new THREE.Mesh(sweep(smoothProfile([[ix + 0.03, 1.64], [ix - 0.005, 1.655], [ix - 0.012, 1.7], [ix, 1.72]], 4), binX0, binX1, s), this.clipped(m.shellDark)); lip.userData.ceiling = true; this.cabin.add(lip);
-      const door = new THREE.Mesh(sweep(smoothProfile([[ix, 1.72], [ix - 0.02, 1.84], [ix + 0.02, 1.96], [ix + 0.12, 2.04], [ix + 0.24, 2.08]], 8), binX0, binX1, s), bin); door.userData.ceiling = true; this.cabin.add(door);
-      // 間接照明槽（櫃頂上方發光，打亮天花板）
-      const cove = new THREE.Mesh(new THREE.BoxGeometry(binX1 - binX0, 0.006, 0.05), glowMat); cove.position.set((binX0 + binX1) / 2, 2.075, s * (ix + 0.29)); cove.userData.ceiling = true; this.cabin.add(cove);
+      // 牆頂到天花板的弧形過渡板（全長；門區、廚房上方沒有行李櫃時可見）
+      const shoulder = new THREE.Mesh(sweep(smoothProfile([[R - 0.17, 1.64], [R - 0.3, 1.86], [R - 0.48, 2.02], [ix + 0.3, 2.1]], 6), 0, L, s), ceil); shoulder.userData.ceiling = true; this.cabin.add(shoulder);
       // 天花板（從照明槽往中央拱起）
       const cl = new THREE.Mesh(sweep(smoothProfile([[ix + 0.3, 2.1], [ix * 0.55, 2.24], [ix * 0.25, 2.29], [0, 2.3]], 6), 0, L, s), ceil); cl.userData.ceiling = true; this.cabin.add(cl);
-      const top = new THREE.Mesh(sweep([[ix + 0.24, 2.08], [ix + 0.3, 2.1]], binX0, binX1, s), bin); top.userData.ceiling = true; this.cabin.add(top);
-      const back = new THREE.Mesh(sweep([[R - 0.17, 1.64], [R - 0.2, 2.1], [ix + 0.3, 2.1]], binX0, binX1, s), binUnder); back.userData.ceiling = true; this.cabin.add(back);
+      // 行李櫃：只裝在座位區上方（艙門、廚房區沒有行李櫃，與真實機艙相同）
+      for (const [bx0, bx1] of binZones) {
+        const under = new THREE.Mesh(sweep([[R - 0.17, 1.64], [ix + 0.03, 1.64]], bx0, bx1, s), binUnder); under.userData.ceiling = true; this.cabin.add(under);
+        const lip = new THREE.Mesh(sweep(smoothProfile([[ix + 0.03, 1.64], [ix - 0.005, 1.655], [ix - 0.012, 1.7], [ix, 1.72]], 4), bx0, bx1, s), this.clipped(m.shellDark)); lip.userData.ceiling = true; this.cabin.add(lip);
+        const door = new THREE.Mesh(sweep(smoothProfile([[ix, 1.72], [ix - 0.02, 1.84], [ix + 0.02, 1.96], [ix + 0.12, 2.04], [ix + 0.24, 2.08]], 8), bx0, bx1, s), bin); door.userData.ceiling = true; this.cabin.add(door);
+        const cove = new THREE.Mesh(new THREE.BoxGeometry(bx1 - bx0, 0.006, 0.05), glowMat); cove.position.set((bx0 + bx1) / 2, 2.075, s * (ix + 0.29)); cove.userData.ceiling = true; this.cabin.add(cove);
+        const top = new THREE.Mesh(sweep([[ix + 0.24, 2.08], [ix + 0.3, 2.1]], bx0, bx1, s), bin); top.userData.ceiling = true; this.cabin.add(top);
+        // 兩端封板
+        for (const ex of [bx0, bx1]) {
+          const capS = new THREE.Shape(); const pts = [[R - 0.17, 1.64], [ix + 0.03, 1.64], [ix - 0.012, 1.7], [ix, 1.84], [ix + 0.12, 2.04], [ix + 0.3, 2.1], [R - 0.48, 2.02], [R - 0.3, 1.86]];
+          capS.moveTo(pts[0][0], pts[0][1]); pts.slice(1).forEach(([a2, b2]) => capS.lineTo(a2, b2));
+          const cg = new THREE.ShapeGeometry(capS); cg.rotateY(s > 0 ? -Math.PI / 2 : Math.PI / 2);
+          const capm = new THREE.Mesh(cg, binUnder); capm.position.x = ex; if (s < 0) capm.scale.z = 1; capm.userData.ceiling = true; this.cabin.add(capm);
+        }
+      }
       // 櫃門接縫與把手凹槽
       const seamMat = this.clipped(m.shellDark); seamMat.color = new THREE.Color('#8b9097');
-      const n = Math.floor((binX1 - binX0) / 1.52);
-      const seams = new THREE.InstancedMesh(new THREE.BoxGeometry(0.006, 0.34, 0.012), seamMat, n);
-      const handles = new THREE.InstancedMesh(new RoundedBoxGeometry(0.22, 0.022, 0.03, 2, 0.01), seamMat, n);
-      for (let k = 0; k < n; k++) {
-        const x = binX0 + (k + 1) * 1.52;
-        seams.setMatrixAt(k, M(x, 1.88, s * (ix - 0.012), s > 0 ? 0.1 : -0.1, 0, 0));
-        handles.setMatrixAt(k, M(x - 0.76, 1.7, s * (ix - 0.014)));
-      }
+      const doorsX = [];
+      binZones.forEach(([bx0, bx1]) => { const n = Math.max(1, Math.round((bx1 - bx0) / 1.52)); const wdt = (bx1 - bx0) / n; for (let k = 0; k <= n; k++) doorsX.push([bx0 + k * wdt, k < n ? bx0 + (k + 0.5) * wdt : null]); });
+      const seams = new THREE.InstancedMesh(new THREE.BoxGeometry(0.006, 0.34, 0.012), seamMat, doorsX.length);
+      const handles = new THREE.InstancedMesh(new RoundedBoxGeometry(0.22, 0.022, 0.03, 2, 0.01), seamMat, doorsX.length);
+      doorsX.forEach(([xs0, xh], k) => {
+        seams.setMatrixAt(k, M(xs0, 1.88, s * (ix - 0.012), s > 0 ? 0.1 : -0.1, 0, 0));
+        handles.setMatrixAt(k, xh == null ? M(0, -10, 0, 0, 0, 0, 0.001, 0.001, 0.001) : M(xh, 1.7, s * (ix - 0.014)));
+      });
       seams.userData.ceiling = true; handles.userData.ceiling = true;
       this.cabin.add(seams, handles);
     }
@@ -555,7 +574,7 @@ export class View3D {
         g.add(sp);
       }
       g.position.copy(P(s.x, s.y, 0));
-      g.userData.ind = ind;
+      g.userData.ind = ind; g.userData.seat = p.seat;
       this.cabin.add(g);
       this.paxMeshes.set(p.seat, g);
     });
@@ -683,7 +702,8 @@ export class View3D {
     this.mode = mode;
     this.applyMode();
     if (mode === 'fp') { this.fpView.yaw = this.fp.yaw; this.fpView.pitch = this.fp.pitch; }
-    if (mode !== 'fp' && document.pointerLockElement) document.exitPointerLock();
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.renderer.domElement.style.cursor = mode === 'fp' ? 'grab' : 'default';
   }
 
   bind() {
@@ -691,29 +711,30 @@ export class View3D {
     let drag = null;
     el.addEventListener('contextmenu', (e) => e.preventDefault());
     el.addEventListener('pointerdown', (e) => {
-      if (this.mode === 'fp') {
-        if (!document.pointerLockElement && el.requestPointerLock) { try { const r = el.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (er) { /* 不支援時改用拖曳 */ } }
-        drag = { x: e.clientX, y: e.clientY, fpDrag: true };
-        return;
-      }
-      drag = { x: e.clientX, y: e.clientY, btn: e.button, moved: false };
+      drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, btn: e.button, moved: false };
+      if (this.mode === 'fp') el.style.cursor = 'grabbing';
     });
+    let hoverT = 0;
     window.addEventListener('pointermove', (e) => {
-      if (this.mode === 'fp') {
-        if (document.pointerLockElement === el) {
-          this.fp.yaw -= e.movementX * 0.0022;
-          this.fp.pitch = Math.max(-1.2, Math.min(1.2, this.fp.pitch - e.movementY * 0.0022));
-        } else if (drag && drag.fpDrag) {
-          this.fp.yaw -= (e.clientX - drag.x) * 0.004;
-          this.fp.pitch = Math.max(-1.2, Math.min(1.2, this.fp.pitch - (e.clientY - drag.y) * 0.004));
-          drag.x = e.clientX; drag.y = e.clientY;
+      if (!drag) {
+        // 滑鼠移到可互動的人物上時顯示手指游標
+        if (e.target === el && performance.now() - hoverT > 90) {
+          hoverT = performance.now();
+          const h = this.hitTest(e, false);
+          el.style.cursor = h ? 'pointer' : this.mode === 'fp' ? 'grab' : 'default';
         }
         return;
       }
-      if (!drag) return;
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-      if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+      if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 4) drag.moved = true;
       drag.x = e.clientX; drag.y = e.clientY;
+      if (!drag.moved) return;
+      if (this.mode === 'fp') {
+        // 按住滑鼠拖曳才轉動視角（不鎖定游標）
+        this.fp.yaw -= dx * 0.0042;
+        this.fp.pitch = Math.max(-1.2, Math.min(1.2, this.fp.pitch - dy * 0.0042));
+        return;
+      }
       if (drag.btn === 2 || e.shiftKey) {
         const right = new THREE.Vector3(Math.sin(this.orbit.yaw), 0, -Math.cos(this.orbit.yaw));
         const fwd = new THREE.Vector3(-Math.cos(this.orbit.yaw), 0, -Math.sin(this.orbit.yaw));
@@ -725,7 +746,11 @@ export class View3D {
       }
     });
     window.addEventListener('pointerup', (e) => {
-      if (drag && !drag.fpDrag && !drag.moved && drag.btn === 0 && this.mode === 'orbit') this.pick(e);
+      if (drag && !drag.moved && drag.btn === 0 && e.target === el) {
+        const h = this.hitTest(e, true);
+        if (h) this.app.onPick(h);
+      }
+      if (this.mode === 'fp') el.style.cursor = 'grab';
       drag = null;
     });
     el.addEventListener('wheel', (e) => {
@@ -737,15 +762,31 @@ export class View3D {
     window.addEventListener('blur', () => { this.keys = {}; });
   }
 
-  pick(e) {
+  // 點選判定：人物（旅客 / 組員）優先，其次為地板位置
+  hitTest(e, withFloor) {
     const r = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     const ray = new THREE.Raycaster();
     ray.setFromCamera(ndc, this.camera);
+    ray.camera = this.camera;
+    const people = [...this.paxMeshes.values(), ...(this.npcMeshes ? this.npcMeshes.values() : [])];
+    const hits = ray.intersectObjects(people, true).filter((h) => !h.object.isSprite && h.distance < 30);
+    // 被座椅、牆面擋住的人物不可點
+    if (hits.length) {
+      const blockers = ray.intersectObjects(this.cabin.children.filter((o) => !people.includes(o) && o.visible && o.isMesh), false);
+      const first = hits[0];
+      if (!blockers.length || blockers[0].distance > first.distance - 0.05) {
+        let o = first.object;
+        while (o && !o.userData.seat && !o.userData.npcId) o = o.parent;
+        if (o) return o.userData.seat ? { type: 'pax', seat: o.userData.seat } : { type: 'npc', id: o.userData.npcId };
+      }
+    }
+    if (!withFloor) return null;
     const inv = new THREE.Matrix4().copy(this.cabin.matrixWorld).invert();
     const local = ray.ray.clone().applyMatrix4(inv);
     const hit = new THREE.Vector3();
-    if (local.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.45), hit)) this.app.onPlayClick({ x: hit.x, y: -hit.z });
+    if (local.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit)) return { type: 'floor', x: hit.x, y: -hit.z };
+    return null;
   }
 
   // 第一人稱移動：加速與慣性
@@ -893,7 +934,7 @@ export class View3D {
           const lb = this.label(n.name.replace(/^(學姊|座艙長)\s*/, ''), new THREE.Vector3(0, 2.2, 0), 0.6);
           lb.visible = this.mode !== 'fp';
           mm.add(lb);
-          mm.userData.prev = { x: n.x, y: n.y };
+          mm.userData.prev = { x: n.x, y: n.y }; mm.userData.npcId = n.id;
           this.cabin.add(mm); this.npcMeshes.set(n.id, mm);
         }
         const mv = Math.hypot(n.x - mm.userData.prev.x, n.y - mm.userData.prev.y) > 0.0015;
@@ -912,7 +953,15 @@ export class View3D {
       if (moving && spd > 0.1) this.bob += dt * spd * 5.2;
       const amp = Math.min(1, spd);
       const bobY = Math.sin(this.bob * 2) * 0.016 * amp, bobX = Math.cos(this.bob) * 0.01 * amp;
-      const eyeH = walker.seated ? 1.12 : EYE_H;
+      let eyeH = walker.seated ? 1.12 : EYE_H;
+      // 走到行李櫃下方時（例如靠窗走動）自動略為低頭，避免鏡頭穿進行李櫃
+      const underBin = (this.binZones || []).some(([a, b]) => walker.x > a - 0.25 && walker.x < b + 0.25);
+      if (underBin && !walker.seated) {
+        const over = Math.abs(walker.y) - (this.binInner - 0.22);
+        if (over > 0) eyeH = Math.min(eyeH, EYE_H - Math.min(1, over / 0.15) * (EYE_H - 1.52));
+      }
+      this.eyeH = this.eyeH == null ? eyeH : this.eyeH + (eyeH - this.eyeH) * Math.min(1, dt * 10);
+      eyeH = this.eyeH;
       const right = new THREE.Vector3(Math.sin(this.fpView.yaw), 0, Math.cos(this.fpView.yaw));
       this.eye.position.copy(P(walker.x, walker.y, eyeH + bobY)).addScaledVector(right, bobX);
       this.eye.rotation.set(0, 0, 0, 'YXZ');
