@@ -27,6 +27,18 @@ python3 -m http.server 8080
 | 座艙長 | 可以把任務指派給能力不同的組員，並處理組員衝突、向機長報告客艙準備完成。 |
 | 角色 | 可自訂航空公司名稱、制服（外套、裙或褲、絲巾、襯衫、帽子）、髮色與膚色，顏色也會套用到機身塗裝。 |
 
+## 本機測試版（不需 AI 金鑰）
+
+不需要安裝套件，只要有 Node.js 18 以上即可。
+
+- Windows：雙擊 `cabin/start-test.bat`
+- Mac：雙擊 `cabin/start-test.command`
+- 或在 repo 根目錄執行 `node cabin/server/test-server.js`
+
+啟動後開啟 <http://localhost:3013/cabin/>。接著進入「設定」，按「使用本機測試伺服器」，再按「測試連線」，看到 ✅ 就可以開始飛行並練習廣播。
+
+測試伺服器用「模擬 AI」評分：依文字比對和關鍵詞算出分數，再用學姊或座艙長的口吻產生講評，終端機會印出每次評分的紀錄。它的請求與回應格式和正式版完全相同，之後接上 3012 的真正 AI 時，只要在設定改成「填入 3012 預設網址」即可。如果 3013 埠被占用，可以改用其他埠：`PORT=3014 node cabin/server/test-server.js`。
+
 ## 接上 3012 AI 伺服器評分廣播
 
 `server/announcement-judge.js` 是一個可直接掛到 Express 伺服器的路由，會沿用伺服器原本呼叫 AI 的方式與 API 金鑰。

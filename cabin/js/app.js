@@ -574,6 +574,7 @@ class App {
       field('語音辨識語言', h('select', { onchange: (e) => { s.speechLang = e.target.value; this.changed(); } }, [['zh-TW', '中文（台灣）'], ['en-US', 'English'], ['ja-JP', '日本語']].map(([v, n]) => h('option', { value: v, selected: s.speechLang === v }, n)))),
       field('AI 評分端點（選填）', h('input', { value: s.aiEndpoint, placeholder: '例如 http://127.0.0.1:3012/api/judge-announcement', onchange: (e) => { s.aiEndpoint = e.target.value.trim(); this.changed(); } })),
       h('div', { class: 'btns' },
+        h('button', { onclick: () => { s.aiEndpoint = '/api/judge-announcement'; this.changed('panel'); } }, '使用本機測試伺服器'),
         h('button', { onclick: () => { s.aiEndpoint = location.port === '3012' ? '/api/judge-announcement' : 'http://127.0.0.1:3012/api/judge-announcement'; this.changed('panel'); } }, '填入 3012 預設網址'),
         h('button', { class: 'primary', onclick: async (e) => {
           const out = e.target.closest('div').nextElementSibling;
