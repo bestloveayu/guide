@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>虛擬機艙編輯器</title>
+  <link rel="stylesheet" href="cabin.css">
+  <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">✈ 虛擬機艙 <small>空服員訓練模擬</small></div>
+    <nav class="seg" id="modeSeg">
+      <button data-mode="edit" class="on">🛠 編輯器</button>
+      <button data-mode="play">🛫 模擬飛行</button>
+    </nav>
+    <nav class="seg" id="viewSeg">
+      <button data-view="2d" class="on">平面圖</button>
+      <button data-view="orbit">3D 預設</button>
+      <button data-view="fp">第一人稱</button>
+    </nav>
+    <div class="spacer"></div>
+    <div id="profileChip" title="生涯"></div>
+  </header>
+
+  <main id="main">
+    <aside id="leftPanel">
+      <nav class="tabs" id="tabs">
+        <button data-tab="aircraft" class="on">機艙</button>
+        <button data-tab="pax">旅客</button>
+        <button data-tab="tasks">任務</button>
+        <button data-tab="story">劇情</button>
+        <button data-tab="crew">角色</button>
+        <button data-tab="career">生涯</button>
+        <button data-tab="settings">設定</button>
+      </nav>
+      <div id="panelBody"></div>
+    </aside>
+
+    <section id="stage">
+      <canvas id="cv2d"></canvas>
+      <div id="three"></div>
+      <div id="toolbar"></div>
+      <div id="hint"></div>
+      <div id="hud" hidden>
+        <div id="phaseBar"></div>
+        <div id="envBox"></div>
+        <div id="interactBox"></div>
+      </div>
+      <div id="toasts"></div>
+    </section>
+
+    <aside id="rightPanel" hidden>
+      <div id="flightInfo"></div>
+      <div class="ctrls">
+        <button id="btnPause">⏸ 暫停</button>
+        <select id="speedSel"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option></select>
+        <button id="btnEnd" class="danger">結束航班</button>
+      </div>
+      <h3>任務佇列 <small>依優先順序排列</small></h3>
+      <div id="taskList"></div>
+      <div id="crewBox"></div>
+      <h3>對話紀錄</h3>
+      <div id="logBox"></div>
+    </aside>
+  </main>
+
+  <div id="modal" class="modal" hidden><div class="modal-card" id="modalCard"></div></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
