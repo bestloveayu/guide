@@ -75,7 +75,7 @@ class App {
     $('#profileChip').addEventListener('click', () => { if (this.mode === 'edit') { this.tab = 'career'; this.renderPanel(); } });
     $('#btnPause').addEventListener('click', () => this.togglePause());
     $('#speedSel').addEventListener('change', (e) => { if (this.sim) this.sim.timeScale = +e.target.value; });
-    $('#btnEnd').addEventListener('click', () => { if (this.sim && confirm('確定要提前結束航班嗎？未完成任務將視為失敗。')) this.sim.finish(); });
+    $('#btnEnd').addEventListener('click', async () => { if (this.sim && await this.ask('確定要提前結束航班嗎？未完成任務將視為失敗。')) this.sim.finish(); });
     window.addEventListener('keydown', (e) => {
       if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
       if (this.sim && !this.sim.ended) {
@@ -186,7 +186,7 @@ class App {
       h('div', { class: 'row' }, tplSel, h('button', { onclick: () => { const a = buildTemplate(tplSel.value); st.aircraft.push(a); st.currentAircraft = a.id; this.afterAircraftSwitch(); } }, '＋ 由範本新增')),
       h('div', { class: 'btns' },
         h('button', { onclick: () => { const a = JSON.parse(JSON.stringify(ac)); a.id = newId('ac'); a.name += '（複本）'; st.aircraft.push(a); st.currentAircraft = a.id; this.afterAircraftSwitch(); } }, '複製'),
-        h('button', { onclick: () => { if (st.aircraft.length > 1 && confirm(`刪除「${ac.name}」？`)) { st.aircraft = st.aircraft.filter((a) => a !== ac); st.currentAircraft = st.aircraft[0].id; this.afterAircraftSwitch(); } } }, '刪除'),
+        h('button', { onclick: async () => { if (st.aircraft.length > 1 && await this.ask(`刪除「${ac.name}」？`)) { st.aircraft = st.aircraft.filter((a) => a !== ac); st.currentAircraft = st.aircraft[0].id; this.afterAircraftSwitch(); } } }, '刪除'),
         h('button', { onclick: () => download(`${ac.name}.aircraft.json`, ac) }, '匯出 JSON'),
         h('label', { class: 'filebtn', style: 'display:inline-block;margin:0' }, h('span', { class: 'btnlike', style: 'border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer;display:inline-block;color:var(--text)' }, '匯入 JSON'),
           h('input', { type: 'file', accept: '.json,application/json', style: 'display:none', onchange: (e) => this.importAircraft(e.target.files[0]) }))),
@@ -211,7 +211,7 @@ class App {
         h('div', { class: 'btns' },
           h('button', { onclick: () => this.removeSelectedSeats() }, '移除座位'),
           h('button', { onclick: () => { selSeats.forEach((s) => { s.removed = false; }); this.changed('layout'); this.renderPanel(); } }, '復原座位'),
-          h('button', { onclick: () => { if (confirm(`刪除第 ${rows.join(', ')} 排（含排號）？`)) { removeRows(ac, rows); this.v2.selSeats.clear(); this.changed('layout'); this.renderPanel(); } } }, '刪除整排'),
+          h('button', { onclick: async () => { if (await this.ask(`刪除第 ${rows.join(', ')} 排（含排號）？`)) { removeRows(ac, rows); this.v2.selSeats.clear(); this.changed('layout'); this.renderPanel(); } } }, '刪除整排'),
           h('button', { onclick: () => { const nr = insertRowAfter(ac, rows[rows.length - 1]); this.toast('編輯器', nr ? `已在第 ${rows[rows.length - 1]} 排後插入第 ${nr} 排，後方排號與設施已順移。` : '插入失敗'); this.changed('layout'); this.renderPanel(); } }, '後方插入一排')),
         clsSel);
     } else if (this.v2.selFixture) {
@@ -299,10 +299,10 @@ class App {
     this.changed('panel');
   }
 
-  newBlankAircraft() {
-    const len = +prompt('客艙長度（公尺），可之後再調整', '40');
+  async newBlankAircraft() {
+    const len = +await this.askValue('客艙長度（公尺），可之後再調整', '40');
     if (!len) return;
-    const wid = +prompt('客艙寬度（公尺）：單走道約 3.7、雙走道約 5.5', '3.7') || 3.7;
+    const wid = +await this.askValue('客艙寬度（公尺）：單走道約 3.7、雙走道約 5.5', '3.7') || 3.7;
     const ac = { id: newId('ac'), name: '自訂機艙', width: wid, length: len, seats: [], fixtures: [
       { id: newId('fx'), type: 'cockpit', label: '駕駛艙', x: 1, y: 0, w: 2, d: wid },
       { id: newId('fx'), type: 'door', label: 'L1', x: 2.8, y: -wid / 2 + 0.12, w: 0.9, d: 0.25 },
@@ -327,7 +327,7 @@ class App {
       this.state.currentAircraft = ac.id;
       this.afterAircraftSwitch();
       this.toast('編輯器', `已匯入「${ac.name}」`);
-    } catch (e) { alert('匯入失敗：' + e.message); }
+    } catch (e) { this.toast('系統', '匯入失敗：' + e.message, 'bad'); }
   }
 
   // ---- 旅客 ----
@@ -340,7 +340,7 @@ class App {
       h('div', { class: 'btns' },
         h('button', { onclick: () => { this.v2.tool = 'pax'; this.setView('2d'); this.toast('編輯器', '點擊座位以放置旅客'); } }, '🧍 放置旅客工具'),
         h('button', { onclick: () => this.fillPassengers() }, '隨機填滿'),
-        h('button', { class: 'danger', onclick: () => { if (confirm('清空全部旅客？')) { sc.passengers = []; this.changed('panel'); } } }, '清空')));
+        h('button', { class: 'danger', onclick: async () => { if (await this.ask('清空全部旅客？')) { sc.passengers = []; this.changed('panel'); } } }, '清空')));
     if (this.selPax) {
       const p = sc.passengers.find((x) => x.seat === this.selPax);
       if (p) {
@@ -377,8 +377,8 @@ class App {
     this.renderPanel();
   }
 
-  fillPassengers() {
-    const pct = +prompt('載客率（%）', '80');
+  async fillPassengers() {
+    const pct = +await this.askValue('載客率（%）', '80');
     if (!pct) return;
     const sc = this.scenario(), ac = this.aircraft();
     const taken = new Set(sc.passengers.map((p) => p.seat));
@@ -399,7 +399,7 @@ class App {
     wrap.append(h('h3', {}, `任務與事件（${sc.tasks.length}）`),
       h('p', { class: 'muted' }, '每個任務有觸發階段與時間、優先順序、時間限制、對象（座位/設施）與回應選項。職級限制讓不同職級看到不同任務。'),
       h('div', { class: 'btns' }, h('button', { class: 'primary', onclick: () => this.newTaskFor(null) }, '＋ 新增任務'),
-        h('button', { onclick: () => { if (confirm('恢復成預設任務？')) { sc.tasks = defaultScenario().tasks; this.selTask = null; this.changed('panel'); } } }, '恢復預設')));
+        h('button', { onclick: async () => { if (await this.ask('恢復成預設任務？')) { sc.tasks = defaultScenario().tasks; this.selTask = null; this.changed('panel'); } } }, '恢復預設')));
     if (this.selTask) {
       const t = sc.tasks.find((x) => x.id === this.selTask);
       if (t) wrap.append(this.taskForm(t));
@@ -499,10 +499,10 @@ class App {
       h('div', { class: 'btns' },
         h('button', { onclick: () => { const s = defaultScenario(this.aircraft().id); s.title = '新劇本'; s.passengers = []; s.tasks = s.tasks.filter((t) => t.kind !== 'talk'); st.scenarios.push(s); st.currentScenario = s.id; this.changed('panel'); } }, '＋ 新劇本（僅標準流程）'),
         h('button', { onclick: () => { const s = JSON.parse(JSON.stringify(sc)); s.id = newId('sc'); s.title += '（複本）'; st.scenarios.push(s); st.currentScenario = s.id; this.changed('panel'); } }, '複製'),
-        h('button', { class: 'danger', onclick: () => { if (st.scenarios.length > 1 && confirm('刪除此劇本？')) { st.scenarios = st.scenarios.filter((s) => s !== sc); st.currentScenario = st.scenarios[0].id; this.changed('panel'); } } }, '刪除'),
+        h('button', { class: 'danger', onclick: async () => { if (st.scenarios.length > 1 && await this.ask('刪除此劇本？')) { st.scenarios = st.scenarios.filter((s) => s !== sc); st.currentScenario = st.scenarios[0].id; this.changed('panel'); } } }, '刪除'),
         h('button', { onclick: () => download(`${sc.title}.scenario.json`, sc) }, '匯出'),
         h('label', { style: 'margin:0' }, h('span', { style: 'border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer;display:inline-block;color:var(--text)' }, '匯入'),
-          h('input', { type: 'file', accept: '.json', style: 'display:none', onchange: async (e) => { try { const s = JSON.parse(await readFile(e.target.files[0])); if (!s.tasks) throw new Error('缺少 tasks'); s.id = newId('sc'); st.scenarios.push(s); st.currentScenario = s.id; this.changed('panel'); } catch (er) { alert('匯入失敗：' + er.message); } } }))),
+          h('input', { type: 'file', accept: '.json', style: 'display:none', onchange: async (e) => { try { const s = JSON.parse(await readFile(e.target.files[0])); if (!s.tasks) throw new Error('缺少 tasks'); s.id = newId('sc'); st.scenarios.push(s); st.currentScenario = s.id; this.changed('panel'); } catch (er) { this.toast('系統', '匯入失敗：' + er.message, 'bad'); } } }))),
       field('劇本名稱', h('input', { value: sc.title, onchange: (e) => { sc.title = e.target.value; this.changed('panel'); } })),
       h('div', { class: 'row' }, field('航班編號', h('input', { value: sc.flightNo, onchange: up('flightNo') })), field('航線', h('input', { value: sc.route, onchange: up('route') }))),
       field('使用機艙', h('select', { onchange: (e) => { sc.aircraftId = e.target.value; st.currentAircraft = e.target.value; this.afterAircraftSwitch(); } }, st.aircraft.map((a) => h('option', { value: a.id, selected: a.id === sc.aircraftId }, a.name)))),
@@ -556,8 +556,8 @@ class App {
       h('ul', { class: 'ranks' }, RANKS.map((k, i) => h('li', { class: i === r ? 'cur' : '' }, `${i <= r ? '✔' : '○'} ${k.name}（${k.xp} XP）— ${k.desc}`))),
       h('p', { class: 'muted' }, '每完成一次航班依任務品質、旅客滿意度、優先順序判斷與安全表現獲得經驗值。晉升後會解鎖新的任務（例如安全示範廣播、亂流廣播、醫療事件；座艙長可分派組員、調解組員衝突、向機長報告）。'),
       h('div', { class: 'btns' },
-        h('button', { onclick: () => { const v = prompt('設定經驗值（測試用）', p.xp); if (v != null && !isNaN(+v)) { p.xp = Math.max(0, +v); this.changed('panel'); this.renderProfile(); } } }, '調整 XP（測試）'),
-        h('button', { class: 'danger', onclick: () => { if (confirm('重設生涯紀錄？')) { p.xp = 0; p.flights = 0; p.history = []; this.changed('panel'); this.renderProfile(); } } }, '重設生涯')),
+        h('button', { onclick: async () => { const v = await this.askValue('設定經驗值（測試用）', p.xp); if (v != null && !isNaN(+v)) { p.xp = Math.max(0, +v); this.changed('panel'); this.renderProfile(); } } }, '調整 XP（測試）'),
+        h('button', { class: 'danger', onclick: async () => { if (await this.ask('重設生涯紀錄？')) { p.xp = 0; p.flights = 0; p.history = []; this.changed('panel'); this.renderProfile(); } } }, '重設生涯')),
       h('h3', {}, '飛行紀錄'));
     if (!p.history.length) wrap.append(h('p', { class: 'muted' }, '尚無紀錄。切換到「模擬飛行」開始第一趟航班吧！'));
     p.history.slice().reverse().forEach((f) => wrap.append(h('div', { class: 'card' },
@@ -589,8 +589,8 @@ class App {
       h('div', { class: 'btns' },
         h('button', { onclick: () => download('cabin-sim-backup.json', this.state) }, '匯出全部'),
         h('label', { style: 'margin:0' }, h('span', { style: 'border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer;display:inline-block;color:var(--text)' }, '匯入全部'),
-          h('input', { type: 'file', accept: '.json', style: 'display:none', onchange: async (e) => { try { const j = JSON.parse(await readFile(e.target.files[0])); if (!j.aircraft || !j.scenarios) throw new Error('格式不符'); this.state = j; save(j); location.reload(); } catch (er) { alert('匯入失敗：' + er.message); } } })),
-        h('button', { class: 'danger', onclick: () => { if (confirm('清除所有資料並恢復預設？')) { resetAll(); location.reload(); } } }, '恢復預設')));
+          h('input', { type: 'file', accept: '.json', style: 'display:none', onchange: async (e) => { try { const j = JSON.parse(await readFile(e.target.files[0])); if (!j.aircraft || !j.scenarios) throw new Error('格式不符'); this.state = j; save(j); location.reload(); } catch (er) { this.toast('系統', '匯入失敗：' + er.message, 'bad'); } } })),
+        h('button', { class: 'danger', onclick: async () => { if (await this.ask('清除所有資料並恢復預設？')) { resetAll(); location.reload(); } } }, '恢復預設')));
     return wrap;
   }
 
@@ -648,8 +648,8 @@ class App {
 
   say(sp, tx) { this.toast(sp, tx); this.logLine(sp, tx); }
 
-  exitPlay() {
-    if (this.sim && !this.sim.ended && !confirm('離開模擬將放棄本次航班，確定？')) return;
+  async exitPlay() {
+    if (this.sim && !this.sim.ended && !await this.ask('離開模擬將放棄本次航班，確定？')) return;
     this.sim = null;
     this.mode = 'edit';
     document.querySelectorAll('#modeSeg button').forEach((b) => b.classList.toggle('on', b.dataset.mode === 'edit'));
@@ -840,6 +840,29 @@ class App {
       h('div', { class: 'btns', style: 'justify-content:flex-end' },
         h('button', { onclick: () => { this.closeModal(); this.sim = null; this.exitPlay(); } }, '回到編輯器'),
         h('button', { class: 'primary', onclick: () => { this.closeModal(); this.sim = null; this.briefing(); } }, '再飛一次'))));
+  }
+
+  // ---- 頁內確認 / 輸入框（取代 confirm / prompt，在 Artifact 等環境也能用） ----
+  ask(message) {
+    return new Promise((resolve) => {
+      const done = (v) => { this.closeModal(); resolve(v); };
+      this.openModal(h('div', {}, h('h2', {}, '請確認'), h('p', {}, message),
+        h('div', { class: 'btns', style: 'justify-content:flex-end' },
+          h('button', { onclick: () => done(false) }, '取消'),
+          h('button', { class: 'primary', onclick: () => done(true) }, '確定'))), true);
+    });
+  }
+  askValue(message, def = '') {
+    return new Promise((resolve) => {
+      const input = h('input', { id: 'askValueInput', value: def });
+      const done = (v) => { this.closeModal(); resolve(v); };
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(input.value); });
+      this.openModal(h('div', {}, h('h2', {}, message), input,
+        h('div', { class: 'btns', style: 'justify-content:flex-end;margin-top:12px' },
+          h('button', { onclick: () => done(null) }, '取消'),
+          h('button', { class: 'primary', onclick: () => done(input.value) }, '確定'))), true);
+      setTimeout(() => input.focus(), 0);
+    });
   }
 
   // ---- 對話框 ----
