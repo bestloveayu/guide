@@ -27,19 +27,37 @@ python3 -m http.server 8080
 | 座艙長 | 可以把任務指派給能力不同的組員，並處理組員衝突、向機長報告客艙準備完成。 |
 | 角色 | 可自訂航空公司名稱、制服（外套、裙或褲、絲巾、襯衫、帽子）、髮色與膚色，顏色也會套用到機身塗裝。 |
 
-## 接上 AI 評分（選用）
+## 接上 3012 AI 伺服器評分廣播
 
-在「設定 → AI 評分端點」填入網址後，每次廣播都會送出以下請求：
+`server/announcement-judge.js` 是一個可直接掛到 Express 伺服器的路由，會沿用伺服器原本呼叫 AI 的方式與 API 金鑰。
 
-```http
-POST <endpoint>
-Content-Type: application/json
+1. 把 `server/announcement-judge.js` 複製到 3012 伺服器的專案資料夾。
+2. 在伺服器主程式（`app.listen(3012)` 之前）加入：
 
-{ "reference": "標準廣播詞", "transcript": "玩家講的內容", "keywords": ["安全帶", ...],
-  "speaker": "學姊 美玲", "rank": "空服員", "localScore": 82 }
-```
+   ```js
+   app.use(express.json()); // 已有就不用重複
+   const mountAnnouncementJudge = require('./announcement-judge');
+   mountAnnouncementJudge(app, askAI);
+   ```
 
-端點需回傳 `{ "score": 0-100, "feedback": "以學姊/座艙長口吻的講評" }`。如果請求失敗，會自動改用本機評分。可以把你現有遊戲伺服器的 AI 對話功能包裝成這個端點。
+   `askAI` 是一個函式：輸入提示文字，回傳 AI 的回覆文字。請用伺服器現有呼叫 AI 的程式包裝，例如：
+
+   ```js
+   // OpenAI
+   const askAI = async (prompt) => (await openai.chat.completions.create({
+     model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }] })).choices[0].message.content;
+   // Anthropic Claude
+   const askAI = async (prompt) => (await anthropic.messages.create({
+     model: 'claude-haiku-4-5', max_tokens: 400, messages: [{ role: 'user', content: prompt }] })).content[0].text;
+   ```
+
+3. 重新啟動 3012 伺服器。
+4. 開啟機艙頁面，進入「設定」，按「填入 3012 預設網址」，再按「測試連線」，看到 ✅ 就代表接上了。
+5. 之後每次廣播都會由 AI 評分，講評上會標示「AI 評分」。AI 連不上時會自動改用本機評分。
+
+路由已處理跨來源（CORS），所以機艙頁面用 8080 開、AI 伺服器在 3012 也能使用。如果把 `cabin/` 放進 3012 伺服器的靜態目錄（例如 `app.use(express.static(...))`），網址填 `/api/judge-announcement` 即可。
+
+端點格式：`POST /api/judge-announcement`，請求為 `{ reference, transcript, keywords, speaker, rank, localScore }`，回應為 `{ score: 0-100, feedback }`。
 
 ## 機型規格 JSON（匯入用）
 

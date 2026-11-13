@@ -5,7 +5,7 @@ import { load, save, download, readFile, resetAll } from './store.js';
 import { View2D } from './view2d.js';
 import { View3D } from './view3d.js';
 import { Flight, announcementFor } from './sim.js';
-import { speechSupported, startRecognition, scoreAnnouncement, speak, scoreLocal } from './speech.js';
+import { speechSupported, startRecognition, scoreAnnouncement, speak, scoreLocal, testEndpoint } from './speech.js';
 
 // ---- 小型 DOM 工具 ----
 const $ = (s) => document.querySelector(s);
@@ -573,7 +573,16 @@ class App {
       h('p', { class: 'muted' }, `語音辨識：${speechSupported ? '✅ 此瀏覽器支援（建議使用 Chrome / Edge）' : '❌ 此瀏覽器不支援，可改用文字輸入'}`),
       field('語音辨識語言', h('select', { onchange: (e) => { s.speechLang = e.target.value; this.changed(); } }, [['zh-TW', '中文（台灣）'], ['en-US', 'English'], ['ja-JP', '日本語']].map(([v, n]) => h('option', { value: v, selected: s.speechLang === v }, n)))),
       field('AI 評分端點（選填）', h('input', { value: s.aiEndpoint, placeholder: '例如 http://127.0.0.1:3012/api/judge-announcement', onchange: (e) => { s.aiEndpoint = e.target.value.trim(); this.changed(); } })),
-      h('p', { class: 'muted' }, '留空則使用本機評分（文字相似度＋關鍵詞）。填入端點後會以 POST 傳送 { reference, transcript, keywords, speaker, rank, localScore }，期望回傳 { score, feedback }，由學姊/座艙長說出回饋。'),
+      h('div', { class: 'btns' },
+        h('button', { onclick: () => { s.aiEndpoint = location.port === '3012' ? '/api/judge-announcement' : 'http://127.0.0.1:3012/api/judge-announcement'; this.changed('panel'); } }, '填入 3012 預設網址'),
+        h('button', { class: 'primary', onclick: async (e) => {
+          const out = e.target.closest('div').nextElementSibling;
+          out.textContent = '測試中…';
+          const r = await testEndpoint(s.aiEndpoint);
+          out.innerHTML = r.ok ? `✅ 連線成功（${r.ms} ms）：${esc(r.score)} 分－「${esc(r.feedback)}」` : `❌ ${esc(r.error)}`;
+        } }, '測試連線')),
+      h('p', { class: 'muted' }, '尚未測試'),
+      h('p', { class: 'muted' }, '留空則使用本機評分（文字相似度＋關鍵詞）。填入端點後會以 POST 傳送 { reference, transcript, keywords, speaker, rank, localScore }，期望回傳 { score, feedback }，由學姊/座艙長說出回饋。AI 連不上時會自動改用本機評分。'),
       h('label', { style: 'color:var(--text)' }, h('input', { type: 'checkbox', checked: s.tts, onchange: (e) => { s.tts = e.target.checked; this.changed(); } }), ' 學姊/座艙長以語音唸出回饋'),
       h('h3', {}, '資料'),
       h('div', { class: 'btns' },

@@ -71,7 +71,7 @@ export async function scoreAnnouncement({ reference, transcript, keywords, speak
   if (endpoint) {
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 12000);
+      const timer = setTimeout(() => ctrl.abort(), 20000);
       const resp = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -97,4 +97,30 @@ export function speak(text, enabled = true) {
     u.rate = 1.05;
     window.speechSynthesis.speak(u);
   } catch (e) { /* ignore */ }
+}
+
+// 設定頁「測試連線」：直接呼叫端點並回報實際錯誤（不做本機備援）
+export async function testEndpoint(endpoint) {
+  if (!endpoint) return { ok: false, error: '尚未填入端點網址' };
+  const t0 = performance.now();
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20000);
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reference: '各位貴賓，請繫好安全帶，謝謝。', transcript: '各位貴賓請繫好安全帶謝謝', keywords: ['安全帶'], speaker: '學姊', rank: '見習空服員', localScore: 95 }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    const text = await resp.text();
+    if (!resp.ok) return { ok: false, error: `伺服器回應 ${resp.status}：${text.slice(0, 200)}` };
+    let j;
+    try { j = JSON.parse(text); } catch (e) { return { ok: false, error: `回應不是 JSON：${text.slice(0, 200)}` }; }
+    if (typeof j.score !== 'number') return { ok: false, error: `回應缺少數字 score：${text.slice(0, 200)}` };
+    return { ok: true, score: j.score, feedback: j.feedback || '', ms: Math.round(performance.now() - t0) };
+  } catch (e) {
+    const msg = e.name === 'AbortError' ? '逾時（20 秒）' : `無法連線（${e.message}）。請確認 3012 伺服器已啟動、路由已掛上，且允許跨來源（CORS）`;
+    return { ok: false, error: msg };
+  }
 }
