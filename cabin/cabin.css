@@ -185,3 +185,12 @@ details summary { cursor: pointer; color: var(--muted); }
   #topbar { flex-wrap: wrap; height: auto; padding: 8px 16px; }
   .tabs { grid-template-columns: repeat(4, 1fr); }
 }
+
+/* 交談對話框：滿意度 / 耐心 */
+.meter { display: grid; grid-template-columns: 56px 1fr 34px; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin: 4px 0; }
+.meter i { display: block; height: 6px; background: #22304c; border-radius: 3px; overflow: hidden; }
+.meter b { display: block; height: 100%; border-radius: 3px; }
+.meter em { font: 600 12px var(--mono); font-style: normal; color: var(--text); text-align: right; }
+#interactBox { max-width: min(720px, 92%); flex-direction: row !important; flex-wrap: wrap; justify-content: center; }
+#interactBox button { font-size: 13px; padding: 6px 14px; }
+#interactBox button.task-act { border-color: var(--accent); background: rgba(58,44,20,.95); }

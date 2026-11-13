@@ -60,8 +60,8 @@ class App {
   aircraft() { return this.state.aircraft.find((a) => a.id === this.state.currentAircraft) || this.state.aircraft[0]; }
   scenario() { return this.state.scenarios.find((s) => s.id === this.state.currentScenario) || this.state.scenarios[0]; }
   changed(kind) {
+    if (kind === 'layout') { this.walker = null; const ac = this.aircraft(); if (ac) ac.edited = true; }
     save(this.state);
-    if (kind === 'layout') { this.walker = null; }
     if (kind === 'panel') this.renderPanel();
   }
 
@@ -84,7 +84,7 @@ class App {
     window.addEventListener('keydown', (e) => {
       if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
       if (this.sim && !this.sim.ended) {
-        if (e.code === 'KeyE') { const t = this.sim.interactables()[0]; if (t && !this.sim.modalOpen) this.sim.interact(t); }
+        if (e.code === 'KeyE' && !this.sim.modalOpen) { const a = this.sim.availableActions()[0]; if (a) a.run(); }
         if (e.code === 'KeyP') this.togglePause();
         if (this.sim.modalOpen && /^Digit[1-9]$/.test(e.code)) { const b = document.querySelectorAll('.opt')[+e.code.slice(5) - 1]; if (b) b.click(); }
       }
@@ -646,6 +646,8 @@ class App {
         onToast: (sp, tx, tone) => { this.toast(sp, tx, tone); this.logLine(sp, tx); },
         onDialog: (t) => this.showDialog(t),
         onAnnounce: (t) => this.showAnnounce(t),
+        onChat: (seat, info) => this.showChat(seat, info),
+        onCockpit: () => this.showCockpit(),
         onEnd: (r) => this.endFlight(r),
         onTaskChange: () => { this.taskListDirty = true; },
         onPhase: () => { this.taskListDirty = true; },
@@ -684,6 +686,7 @@ class App {
   onPick(h) {
     if (h.type === 'floor') return this.onPlayClick(h);
     if (h.type === 'pax') return this.onPersonClick(h.seat);
+    if (h.type === 'prop') { if (this.mode === 'play' && this.sim && !this.sim.ended && !this.sim.modalOpen) this.sim.actOnProp(h.id); return; }
     if (h.type === 'npc' && this.sim) {
       const n = this.sim.npcs.find((z) => z.id === h.id);
       if (n) this.toast(n.name, n.task ? `我正在處理「${n.task.def.title}」。` : this.sim.rank >= 3 ? '座艙長，有什麼需要我協助的嗎？可以在任務卡上指派給我。' : '有問題隨時問我喔！');
@@ -700,8 +703,54 @@ class App {
       else { sim.goTo(t); this.pendingTask = t; this.toast('系統', `前往 ${seat}，抵達後會自動開始對話。`); }
       return;
     }
-    const mood = sim.mood[seat] ?? 70;
-    this.toast(p ? `${p.name}（${seat}）` : `旅客（${seat}）`, mood >= 70 ? '謝謝，我目前沒有什麼需要。' : mood >= 40 ? '嗯……還好，有事我再按服務鈴。' : '（看起來心情不太好，也許該關心一下）');
+    sim.openChat(seat); // 沒有任務時也能交談；太遠會先走過去
+  }
+
+  // ---- 一般旅客交談 ----
+  showChat(seat, info) {
+    const sim = this.sim;
+    const p = info.passenger || {};
+    const t = PAX_TYPES[p.type] || PAX_TYPES.normal;
+    const bar = (label, v, col) => h('div', { class: 'meter' }, h('span', {}, label), h('i', {}, h('b', { style: `width:${Math.round(v)}%;background:${col}` })), h('em', {}, Math.round(v)));
+    const mcol = (v) => (v >= 70 ? 'var(--good)' : v >= 40 ? 'var(--warn)' : 'var(--bad)');
+    const result = h('div');
+    const close = h('button', { onclick: () => { this.closeModal(); sim.cancelModal(); } }, '離開');
+    const optsBox = h('div', {}, info.options.map((o, i) => h('button', { class: 'opt', onclick: () => {
+      const r = sim.resolveChat(seat, o);
+      optsBox.remove();
+      result.append(h('div', { class: 'speaker' }, h('div', { class: 'ava' }, t.icon), h('div', { class: 'bubble' }, h('b', {}, `${p.name || '旅客'}（${seat}）`), r.reply)),
+        bar('滿意度', r.mood, mcol(r.mood)), bar('耐心', r.patience, mcol(r.patience)));
+      close.textContent = '完成'; close.className = 'primary';
+    } }, h('kbd', {}, i + 1), o.text)));
+    this.openModal(h('div', {},
+      h('h2', {}, `${t.icon} ${p.name || '旅客'}（${seat}）`),
+      h('div', { class: 'muted' }, [t.name, p.note].filter(Boolean).join('・')),
+      bar('滿意度', info.mood, mcol(info.mood)), bar('耐心', info.patience, mcol(info.patience)),
+      h('div', { class: 'muted', style: 'margin-top:8px' }, `你要對旅客說什麼？（${sim.phase.name}階段・安全帶燈${sim.env.seatbelt ? '亮' : '熄'}）`),
+      optsBox, result,
+      h('div', { class: 'btns', style: 'justify-content:flex-end' }, close)), true);
+  }
+
+  // ---- 駕駛艙門內線 ----
+  showCockpit() {
+    const sim = this.sim;
+    const out = h('div');
+    const choose = (c) => {
+      const r = sim.cockpitRequest(c);
+      box.remove();
+      out.append(h('div', { class: 'speaker' }, h('div', { class: 'ava' }, '👨‍✈️'), h('div', { class: 'bubble' }, h('b', {}, r.speaker), r.text)));
+      done.textContent = '確定'; done.className = 'primary';
+      if (sim.arresting) { done.textContent = '……'; }
+    };
+    const box = h('div', {},
+      h('button', { class: 'opt', onclick: () => choose('procedure') }, h('kbd', {}, 1), '使用內線電話，依程序說明來意（送餐、報告客艙狀況）並請求開門'),
+      h('button', { class: 'opt', onclick: () => choose('noreason') }, h('kbd', {}, 2), '敲門要求開門，不說明原因'),
+      h('button', { class: 'opt', onclick: () => choose('force') }, h('kbd', {}, 3), '堅持要進去，用力拍門要求立刻開門'));
+    const done = h('button', { onclick: () => { this.closeModal(); sim.cancelModal(); } }, '取消');
+    this.openModal(h('div', {},
+      h('h2', {}, '🔒 駕駛艙門'),
+      h('p', { class: 'muted' }, '駕駛艙門平時保持上鎖。進入前必須以內線電話聯絡駕駛員、說明來意並確認客艙走道淨空；起降與滑行等關鍵階段駕駛艙不開放進入。'),
+      box, out, h('div', { class: 'btns', style: 'justify-content:flex-end' }, done)), true);
   }
 
   onPlayClick(w) {
@@ -731,11 +780,11 @@ class App {
       + `${e.turbulence > 0 ? '<span class="sign bad">亂流</span>' : ''}${sim.player.seated ? '<span class="sign good">已就座</span>' : ''}</div>`;
     // 互動按鈕
     const ib = $('#interactBox');
-    const its = sim.modalOpen ? [] : sim.interactables();
-    const key = its.map((t) => t.def.id).join(',');
+    const acts = sim.modalOpen || sim.ended ? [] : sim.availableActions();
+    const key = acts.map((a) => a.id + a.label).join(',');
     if (ib.dataset.key !== key) {
       ib.dataset.key = key; ib.innerHTML = '';
-      its.slice(0, 3).forEach((t, i) => ib.append(h('button', { onclick: () => sim.interact(t) }, i === 0 ? h('kbd', {}, 'E') : null, `${t.def.title}`)));
+      acts.forEach((a, i) => ib.append(h('button', { class: a.task ? 'task-act' : '', onclick: () => a.run() }, i === 0 ? h('kbd', {}, 'E') : null, a.label)));
     }
     // 任務列表（每 0.25 秒或狀態改變時重繪）
     this.hudT = (this.hudT || 0) + 1;
@@ -870,8 +919,9 @@ class App {
     this.renderProfile();
     const next = RANKS[after + 1];
     this.openModal(h('div', {},
-      h('h2', {}, `航班結束｜${r.flight} ${r.route}`),
-      h('div', { class: 'grade' }, r.grade),
+      h('h2', {}, r.failed ? `任務失敗｜${r.flight} ${r.route}` : `航班結束｜${r.flight} ${r.route}`),
+      r.failed ? h('div', { class: 'card', style: 'border-color:var(--bad);color:#ffb3b3' }, h('b', {}, '🚨 遊戲失敗：'), r.reason) : null,
+      h('div', { class: 'grade', style: r.failed ? 'color:var(--bad)' : '' }, r.grade),
       h('div', { class: 'stat' },
         h('div', {}, h('b', {}, `${r.done}/${r.total}`), '完成任務'), h('div', {}, h('b', {}, r.avgQuality), '平均品質'), h('div', {}, h('b', {}, r.satisfaction), '旅客滿意度')),
       h('div', { class: 'stat', style: 'margin-top:6px' },
@@ -879,6 +929,7 @@ class App {
       after > before ? h('div', { class: 'card', style: 'border-color:var(--accent-2);margin-top:10px' },
         h('b', { style: 'color:var(--accent-2);font-size:16px' }, `🎉 晉升為「${RANKS[after].name}」！`), h('div', {}, RANKS[after].desc)) : null,
       h('p', { class: 'muted' }, next ? `目前 ${p.xp} XP，距離「${next.name}」還差 ${next.xp - p.xp} XP。` : `目前 ${p.xp} XP，已達最高職級。`),
+      r.violations && r.violations.length ? h('details', { open: true }, h('summary', {}, `違規紀錄（${r.violations.length}）`), h('ul', {}, r.violations.map((v) => h('li', { style: 'color:#ffb3b3' }, v)))) : null,
       h('details', {}, h('summary', {}, '任務明細'), h('ul', {}, r.tasks.map((t) => h('li', {}, `${t.status === 'done' ? '✔' : '✘'} ${t.title}${t.status === 'done' ? `（${t.quality}）` : ''}`)))),
       h('div', { class: 'btns', style: 'justify-content:flex-end' },
         h('button', { onclick: () => { this.closeModal(); this.sim = null; this.exitPlay(); } }, '回到編輯器'),

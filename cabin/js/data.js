@@ -53,6 +53,7 @@ export const FIXTURE_TYPES = {
   jumpseat: { name: '組員座椅', color: '#c7604f' },
   closet: { name: '衣帽櫃', color: '#8e8a7d' },
   bulkhead: { name: '隔板', color: '#5d6578' },
+  crewrest: { name: '組員休息室', color: '#7d6b8f' },
 };
 
 export const SEAT_CLASS = {
@@ -70,6 +71,8 @@ export const AIRLINES = [
 
 // 機型規格。segments 依序沿 x 方向排列：fixtures（設施區）或 seats（座位區）。
 // fixture 項目：[type, side(L/R/C/F), at(段內起點), w(沿機身長), d(橫向深), label]
+export const TEMPLATE_VERSION = 2; // 範本有變動時遞增（未編輯過的範本機艙會自動更新）
+
 export const AIRCRAFT_SPECS = [
   {
     id: 'a321',
@@ -86,6 +89,7 @@ export const AIRCRAFT_SPECS = [
       },
       { type: 'seats', cls: 'J', from: 1, to: 3, pattern: 'AC-DF', pitch: 1.0, seatW: 0.62 },
       { type: 'seats', cls: 'Y', from: 5, to: 31, skip: [13], pattern: 'ABC-DEF', pitch: 0.79, seatW: 0.46 },
+      { type: 'fixtures', len: 2.2, items: [['crewrest', 'L', 0.15, 1.9, 1.42, '組員休息室'], ['closet', 'R', 0.6, 0.9, 0.6, '衣帽櫃']] },
       {
         type: 'fixtures', len: 2.8, items: [
           ['lav', 'L', 0.1, 0.9, 0.9, '洗手間'], ['lav', 'R', 0.1, 0.9, 0.9, '洗手間'],
@@ -108,6 +112,7 @@ export const AIRCRAFT_SPECS = [
           ['lav', 'R', 1.6, 1.0, 1.0, '洗手間'],
         ],
       },
+      { type: 'fixtures', len: 2.4, items: [['crewrest', 'L', 0.1, 2.2, 1.9, '組員休息室'], ['closet', 'R', 0.6, 1.0, 0.7, '衣帽櫃']] },
       { type: 'seats', cls: 'J', from: 1, to: 7, pattern: 'A-DG-K', pitch: 1.55, seatW: 0.85 },
       {
         type: 'fixtures', len: 2.4, items: [
@@ -238,7 +243,7 @@ export function defaultTasks() {
     },
     { id: 'T10', title: '向機長報告客艙準備完成', kind: 'goto', phase: 'taxi', at: 20, priority: 1, limit: 30, target: { fixture: '駕駛艙' }, xp: 30, minRank: 3, desc: '確認所有組員回報後，通知駕駛艙客艙已準備好起飛。' },
     // 起飛
-    { id: 'T11', title: '回到組員座椅就座', kind: 'seated', phase: 'takeoff', at: 0, priority: 1, limit: 20, target: { fixture: 'jumpseat' }, xp: 20, minRank: 0, desc: '起飛時必須就座並繫好肩帶，進行「靜默檢查」(30 秒複習)。' },
+    { id: 'T11', title: '回到組員座椅就座', kind: 'seated', phase: 'takeoff', at: 0, priority: 1, limit: 20, target: { fixture: 'jumpseat' }, xp: 20, minRank: 0, desc: '起飛時必須坐在組員座椅並繫好安全帶與肩帶，進行「靜默檢查」(30 秒複習)。起飛中不可解開安全帶、站起或開啟行李櫃。' },
     // 巡航
     { id: 'T12', title: '準備餐車', kind: 'goto', phase: 'cruise', at: 0, priority: 3, limit: 60, target: { fixture: 'galley' }, xp: 15, minRank: 0 },
     {
@@ -298,7 +303,7 @@ export function defaultTasks() {
       ],
     },
     // 落地
-    { id: 'T22', title: '回到組員座椅就座', kind: 'seated', phase: 'landing', at: 0, priority: 1, limit: 20, target: { fixture: 'jumpseat' }, xp: 20, minRank: 0 },
+    { id: 'T22', title: '回到組員座椅就座', kind: 'seated', phase: 'landing', at: 0, priority: 1, limit: 20, target: { fixture: 'jumpseat' }, xp: 20, minRank: 0, desc: '落地前坐好並繫上安全帶，停妥前不可解開。' },
     // 下機
     { id: 'T23', title: '落地廣播', kind: 'announce', phase: 'deplane', at: 0, priority: 2, limit: 40, announce: 'arrival', xp: 25, minRank: 0, judge: 'senior' },
     { id: 'T24', title: '解除滑梯預位（Disarm）', kind: 'goto', phase: 'deplane', at: 5, priority: 1, limit: 35, target: { fixture: 'L1' }, xp: 25, minRank: 0 },
@@ -337,3 +342,6 @@ export function defaultScenario(aircraftId = 'a321') {
     tasks: defaultTasks(),
   };
 }
+
+// 駕駛艙組員（駕駛艙門互動時回應）
+export const PILOTS = { captain: '機長 王志遠', fo: '副駕駛 林佳穎' };

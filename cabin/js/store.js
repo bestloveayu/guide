@@ -1,6 +1,6 @@
 // 狀態與儲存：機型庫、劇本、玩家檔案、設定
 import { buildTemplate } from './layout.js';
-import { defaultScenario, AIRLINES } from './data.js';
+import { defaultScenario, AIRLINES, TEMPLATE_VERSION } from './data.js';
 
 const KEY = 'cabinSim.v1';
 
@@ -38,6 +38,11 @@ export function load() {
         const d = defaultState();
         s.profile = { ...d.profile, ...s.profile, uniform: { ...d.profile.uniform, ...(s.profile || {}).uniform } };
         s.settings = { ...d.settings, ...s.settings };
+        // 範本更新：未經編輯的範本機艙換成最新版（例如新增組員休息室），保留 id
+        s.aircraft = s.aircraft.map((a) => {
+          if (!a.templateId || a.edited || a.templateVersion === TEMPLATE_VERSION) return a;
+          const n = buildTemplate(a.templateId); n.id = a.id; n.name = a.name; return n;
+        });
         return s;
       }
     }

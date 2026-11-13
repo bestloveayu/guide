@@ -1,5 +1,5 @@
 // 機艙佈局：由規格產生座位與設施、編輯操作、走道網格與尋路
-import { AIRCRAFT_SPECS } from './data.js';
+import { AIRCRAFT_SPECS, TEMPLATE_VERSION } from './data.js';
 
 const WALL_MARGIN = 0.12;
 let uid = 0;
@@ -72,6 +72,7 @@ export function buildTemplate(id) {
   const ac = buildFromSpec(spec);
   ac.id = newId(spec.id);
   ac.templateId = spec.id;
+  ac.templateVersion = TEMPLATE_VERSION;
   return ac;
 }
 
@@ -164,11 +165,74 @@ export function generateInRect(ac, rect, opts) {
 export const CELL = 0.1;
 export const BODY_R = 0.16; // 角色碰撞半徑（公尺）
 
-function obstacleRects(ac) {
+// ---- 可進入的房間（組員休息室、駕駛艙）：牆面、門、內部家具 ----
+// 回傳 { walls: [rect], door: { rect, x, y, nx, ny }, furniture: [rect] }；rect = {x0,x1,y0,y1}
+export function roomLayout(f, ac) {
+  const t = 0.06;
+  const x0 = f.x - f.w / 2, x1 = f.x + f.w / 2, y0 = f.y - f.d / 2, y1 = f.y + f.d / 2;
+  if (f.type === 'cockpit') {
+    // 駕駛艙：後方隔板（中央有門），內部儀表板與兩張駕駛座
+    const bx = x1, dw = 0.42, W = ac.width;
+    return {
+      walls: [{ x0: bx - t, x1: bx, y0: -W / 2, y1: -dw }, { x0: bx - t, x1: bx, y0: dw, y1: W / 2 }],
+      door: { rect: { x0: bx - t, x1: bx, y0: -dw, y1: dw }, x: bx + 0.35, y: 0, hingeY: -dw, w: dw * 2, plane: 'x', at: bx - t / 2 },
+      furniture: [
+        { x0, x1: x0 + 0.55, y0: -W / 2, y1: W / 2 },
+        { x0: f.x - 0.05, x1: f.x + 0.45, y0: 0.2, y1: 0.7 }, { x0: f.x - 0.05, x1: f.x + 0.45, y0: -0.7, y1: -0.2 },
+      ],
+      seats: [{ x: f.x + 0.2, y: 0.45 }, { x: f.x + 0.2, y: -0.45 }],
+    };
+  }
+  // 組員休息室：靠窗側放上下舖，門開在朝走道的一側
+  const inner = f.y < 0 ? y1 : y0, outer = f.y < 0 ? y0 : y1, sgn = f.y < 0 ? 1 : -1;
+  const dw = 0.4, dx = f.x;
+  const walls = [
+    { x0, x1: x0 + t, y0, y1 }, { x0: x1 - t, x1, y0, y1 },
+    { x0, x1: dx - dw, y0: Math.min(inner, inner - sgn * t), y1: Math.max(inner, inner - sgn * t) },
+    { x0: dx + dw, x1, y0: Math.min(inner, inner - sgn * t), y1: Math.max(inner, inner - sgn * t) },
+  ];
+  const bunkD = Math.min(0.72, f.d * 0.48);
+  return {
+    walls,
+    door: { rect: { x0: dx - dw, x1: dx + dw, y0: Math.min(inner, inner - sgn * t), y1: Math.max(inner, inner - sgn * t) }, x: dx, y: inner + sgn * 0.45, hingeX: dx - dw, w: dw * 2, plane: 'y', at: inner - sgn * t / 2, sgn },
+    furniture: [{ x0: x0 + t, x1: x1 - t, y0: Math.min(outer, outer + sgn * bunkD), y1: Math.max(outer, outer + sgn * bunkD) }],
+    inside: { x0: x0 + t, x1: x1 - t, y0: Math.min(outer + sgn * bunkD, inner - sgn * t), y1: Math.max(outer + sgn * bunkD, inner - sgn * t) },
+    bunk: { outer, sgn, depth: bunkD },
+  };
+}
+
+// doorOpen: { [fixtureId]: true } 表示該房門開啟（可通行）
+function obstacleRects(ac, doorOpen = {}) {
   const rects = [];
   activeSeats(ac).forEach((s) => rects.push({ x0: s.x - s.d / 2, x1: s.x + s.d / 2, y0: s.y - s.w / 2, y1: s.y + s.w / 2 }));
-  ac.fixtures.forEach((f) => { if (f.type !== 'door') rects.push({ x0: f.x - f.w / 2, x1: f.x + f.w / 2, y0: f.y - f.d / 2, y1: f.y + f.d / 2 }); });
+  ac.fixtures.forEach((f) => {
+    if (f.type === 'door') return;
+    if (f.type === 'cockpit' || f.type === 'crewrest') {
+      const r = roomLayout(f, ac);
+      rects.push(...r.walls, ...r.furniture);
+      if (!doorOpen[f.id]) rects.push(r.door.rect);
+      return;
+    }
+    rects.push({ x0: f.x - f.w / 2, x1: f.x + f.w / 2, y0: f.y - f.d / 2, y1: f.y + f.d / 2 });
+  });
   return rects;
+}
+
+// 行李櫃：只在座位區上方，每 ~1.5 m 一片櫃門（sim 與 3D 共用同一份編號）
+export function binDoors(ac) {
+  const rows = [...new Map(activeSeats(ac).map((st) => [st.row, st])).values()].sort((a, b) => a.x - b.x);
+  const zones = [];
+  rows.forEach((rw) => {
+    const half = (rw.pitch || 0.8) / 2, last = zones[zones.length - 1];
+    if (last && rw.x - half - last[1] < 0.9) last[1] = rw.x + half + 0.05;
+    else zones.push([rw.x - half - 0.05, rw.x + half + 0.05]);
+  });
+  const doors = [];
+  zones.forEach(([a, b], zi) => {
+    const n = Math.max(1, Math.round((b - a) / 1.52)), w = (b - a) / n;
+    for (let k = 0; k < n; k++) for (const side of [-1, 1]) doors.push({ id: `bin:${zi}:${k}:${side}`, side, x0: a + k * w, x1: a + (k + 1) * w, x: a + (k + 0.5) * w });
+  });
+  return { zones, doors, inner: ac.width / 2 - 0.74 };
 }
 
 // 圓形 (x, y, r) 是否與任何障礙或機身側牆重疊
@@ -183,12 +247,12 @@ export function collides(grid, x, y, r = BODY_R) {
   return false;
 }
 
-export function buildGrid(ac) {
+export function buildGrid(ac, doorOpen = {}) {
   const W = ac.width;
   const nx = Math.ceil(ac.length / CELL) + 1;
   const ny = Math.round(W / CELL) + 1;
   const g = new Uint8Array(nx * ny); // 1 = 阻擋
-  const grid = { nx, ny, g, W, L: ac.length, rects: obstacleRects(ac) };
+  const grid = { nx, ny, g, W, L: ac.length, rects: obstacleRects(ac, doorOpen) };
   for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
     const p = fromCell(grid, i, j);
     if (collides(grid, p.x, p.y, BODY_R + 0.02)) g[j * nx + i] = 1;
