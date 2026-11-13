@@ -8,6 +8,8 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
+RectAreaLightUniformsLib.init();
 import { PAX_TYPES, PRIORITY } from './data.js';
 import { activeSeats } from './layout.js';
 import { M, materials, textures, seatAsset, passengerGeometry, PAX_MAT, makeCrew as buildCrew } from './art.js';
@@ -125,7 +127,7 @@ export class View3D {
     this.container = container;
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMapping = THREE.AgXToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -155,7 +157,7 @@ export class View3D {
     this.scene.environment = this.envTex;
 
     this.scene.fog = new THREE.Fog(0xbfd6ee, 80, 1400);
-    this.hemi = new THREE.HemisphereLight(0xe8eeff, 0xa59a8f, 0.35);
+    this.hemi = new THREE.HemisphereLight(0xe8eeff, 0xc9bfb3, 0.35);
     this.scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(0xfff1dc, 1.7);
     this.sun.castShadow = true;
@@ -178,7 +180,7 @@ export class View3D {
     this.renderPass = new RenderPass(this.scene, this.camera);
     this.gtao = new GTAOPass(this.scene, this.camera, 1, 1);
     this.gtao.blendIntensity = 0.9;
-    this.gtao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.5, thickness: 1.2, scale: 1.0, samples: 12 });
+    this.gtao.updateGtaoMaterial({ radius: 0.45, distanceExponent: 1.6, thickness: 1.5, scale: 1.15, samples: 16 });
     this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.22, 0.45, 1.3);
     this.outputPass = new OutputPass();
     this.smaa = new SMAAPass(1, 1);
@@ -295,54 +297,118 @@ export class View3D {
     for (let i = 0; i < ys.length - 1; i++) if (ys[i + 1] - ys[i] > 0.75) edges.push(ys[i] + 0.28, ys[i + 1] - 0.28);
     edges.slice(0, 4).forEach((yy) => { const st = new THREE.Mesh(new THREE.BoxGeometry(L - 6, 0.004, 0.012), pathMat); st.position.set(L / 2 + 0.5, 0.006, -yy); this.cabin.add(st); });
 
-    // 側牆、行李櫃、天花板（平滑弧面）
-    const wall = this.clipped(m.wall);
-    const kick = this.clipped(m.kick);
+    // ===== 客艙內裝（依照片：側牆內襯板、圓形窗框凹槽、大型行李櫃、間接照明天花板） =====
+    const binX0 = 2.4, binX1 = L - 1.6;
+    // 側牆貼圖：每兩扇窗一道內襯板接縫、下方腳踢板回風格柵
+    const wallTex = canvasTex(256, 512, (g) => {
+      const gr = g.createLinearGradient(0, 0, 0, 512); gr.addColorStop(0, '#e6e6e3'); gr.addColorStop(1, '#d6d7d4');
+      g.fillStyle = gr; g.fillRect(0, 0, 256, 512);
+      g.fillStyle = 'rgba(70,74,80,0.35)'; g.fillRect(0, 0, 2, 512); g.fillStyle = 'rgba(255,255,255,0.5)'; g.fillRect(2, 0, 1, 512);
+      g.fillStyle = 'rgba(0,0,0,0.06)'; for (let i = 0; i < 6; i++) g.fillRect(0, 300 + i * 30, 256, 1);
+    });
+    wallTex.wrapS = THREE.RepeatWrapping; wallTex.repeat.set(1 / 1.06, 1 / 1.6); wallTex.offset.x = -3.2 / 1.06 + 0.25;
+    const wall = this.clipped(m.wall); wall.map = wallTex; wall.color = new THREE.Color('#ffffff');
+    const dadoTex = canvasTex(256, 64, (g) => { g.fillStyle = '#b9bcc0'; g.fillRect(0, 0, 256, 64); g.fillStyle = '#5c6068'; for (let x = 10; x < 256; x += 8) g.fillRect(x, 18, 4, 30); });
+    dadoTex.wrapS = THREE.RepeatWrapping; dadoTex.repeat.set(1 / 0.53, 1 / 0.25);
+    const kick = this.clipped(m.kick); kick.map = dadoTex; kick.color = new THREE.Color('#ffffff');
     const bin = this.clipped(m.bin);
-    const ceil = this.clipped(m.ceiling);
-    const glowCeil = this.clipped(m.ceiling); glowCeil.emissive = new THREE.Color('#ffe6c7'); glowCeil.emissiveIntensity = 0.35;
-    this.glowCeil = glowCeil;
+    const binUnder = this.clipped(m.binUnder);
+    const ceilTex = canvasTex(512, 256, (g) => {
+      g.fillStyle = '#e4e4e0'; g.fillRect(0, 0, 512, 256);
+      g.fillStyle = 'rgba(60,64,70,0.28)'; g.fillRect(0, 0, 3, 256);
+      g.fillStyle = 'rgba(0,0,0,0.05)'; g.fillRect(250, 0, 12, 256);
+      g.fillStyle = '#c9cbcd'; g.beginPath(); g.arc(380, 128, 14, 0, 7); g.fill(); g.fillStyle = '#9da1a6'; for (let k = -8; k <= 8; k += 4) g.fillRect(372, 128 + k, 16, 1.5);
+    });
+    ceilTex.wrapS = THREE.RepeatWrapping; ceilTex.repeat.set(1 / 1.52, 1 / 3);
+    const ceil = this.clipped(m.ceiling); ceil.map = ceilTex; ceil.color = new THREE.Color('#ffffff');
+    const glowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.1, 0.98, 0.8), toneMapped: false });
+    this.glowMats = [glowMat];
     for (const s of [-1, 1]) {
-      this.cabin.add(new THREE.Mesh(sweep([[R, 0], [R + 0.02, 0.22]], 0, L, s), kick));
-      this.cabin.add(new THREE.Mesh(sweep(smoothProfile([[R + 0.02, 0.22], [R + 0.05, 0.7], [R + 0.03, 1.15], [R - 0.04, 1.45], [R - 0.14, 1.62]]), 0, L, s), wall));
-      const binPts = smoothProfile([[R - 0.14, 1.62], [R - 0.45, 1.64], [R - 0.66, 1.7], [R - 0.7, 1.86], [R - 0.62, 2.02], [R - 0.5, 2.07]], 5);
-      const bm = new THREE.Mesh(sweep(binPts, 2.4, L - 1.6, s), bin); bm.userData.ceiling = true; this.cabin.add(bm);
-      const back = new THREE.Mesh(sweep([[R - 0.14, 1.62], [R - 0.14, 2.06], [R - 0.5, 2.07]], 2.4, L - 1.6, s), bin); back.userData.ceiling = true; this.cabin.add(back);
-      const cl = new THREE.Mesh(sweep(smoothProfile([[R - 0.5, 2.07], [R * 0.55, 2.2], [R * 0.25, 2.26], [0, 2.27]], 5), 0, L, s), ceil); cl.userData.ceiling = true; this.cabin.add(cl);
-      const wash = new THREE.Mesh(sweep(smoothProfile([[R - 0.5, 2.072], [R * 0.75, 2.14], [R * 0.6, 2.18]], 4), 2.4, L - 1.6, s), glowCeil); wash.userData.ceiling = true; this.cabin.add(wash);
-      const led = new THREE.Mesh(new THREE.BoxGeometry(L - 4.2, 0.012, 0.03), new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 1.9, 1.5), toneMapped: false }));
-      led.position.set(L / 2 + 0.4, 2.078, s * (R - 0.53)); led.userData.ceiling = true; this.cabin.add(led); this.glow.push(led);
-      const seamMat = this.clipped(m.shellDark);
-      for (let x = 3.2; x < L - 1.8; x += 1.55) {
-        const seam = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.36, 0.01), seamMat); seam.position.set(x, 1.84, s * (R - 0.697)); seam.userData.ceiling = true; this.cabin.add(seam);
-        const latch = new THREE.Mesh(new RoundedBoxGeometry(0.16, 0.03, 0.02, 2, 0.008), seamMat); latch.position.set(x + 0.78, 1.73, s * (R - 0.68)); latch.userData.ceiling = true; this.cabin.add(latch);
+      // 側牆（下方腳踢板 + 弧形內襯板）
+      this.cabin.add(new THREE.Mesh(sweep([[R, 0], [R + 0.015, 0.25]], 0, L, s), kick));
+      this.cabin.add(new THREE.Mesh(sweep(smoothProfile([[R + 0.015, 0.25], [R + 0.05, 0.75], [R + 0.03, 1.15], [R - 0.05, 1.45], [R - 0.17, 1.64]], 8), 0, L, s), wall));
+      // 行李櫃：底面（PSU 所在）→ 下緣把手唇邊 → 弧形櫃門 → 頂部
+      const ix = R - 0.74; // 行李櫃內緣（離中線距離）
+      const under = new THREE.Mesh(sweep([[R - 0.17, 1.64], [ix + 0.03, 1.64]], binX0, binX1, s), binUnder); under.userData.ceiling = true; this.cabin.add(under);
+      const lip = new THREE.Mesh(sweep(smoothProfile([[ix + 0.03, 1.64], [ix - 0.005, 1.655], [ix - 0.012, 1.7], [ix, 1.72]], 4), binX0, binX1, s), this.clipped(m.shellDark)); lip.userData.ceiling = true; this.cabin.add(lip);
+      const door = new THREE.Mesh(sweep(smoothProfile([[ix, 1.72], [ix - 0.02, 1.84], [ix + 0.02, 1.96], [ix + 0.12, 2.04], [ix + 0.24, 2.08]], 8), binX0, binX1, s), bin); door.userData.ceiling = true; this.cabin.add(door);
+      // 間接照明槽（櫃頂上方發光，打亮天花板）
+      const cove = new THREE.Mesh(new THREE.BoxGeometry(binX1 - binX0, 0.006, 0.05), glowMat); cove.position.set((binX0 + binX1) / 2, 2.075, s * (ix + 0.29)); cove.userData.ceiling = true; this.cabin.add(cove);
+      // 天花板（從照明槽往中央拱起）
+      const cl = new THREE.Mesh(sweep(smoothProfile([[ix + 0.3, 2.1], [ix * 0.55, 2.24], [ix * 0.25, 2.29], [0, 2.3]], 6), 0, L, s), ceil); cl.userData.ceiling = true; this.cabin.add(cl);
+      const top = new THREE.Mesh(sweep([[ix + 0.24, 2.08], [ix + 0.3, 2.1]], binX0, binX1, s), bin); top.userData.ceiling = true; this.cabin.add(top);
+      const back = new THREE.Mesh(sweep([[R - 0.17, 1.64], [R - 0.2, 2.1], [ix + 0.3, 2.1]], binX0, binX1, s), binUnder); back.userData.ceiling = true; this.cabin.add(back);
+      // 櫃門接縫與把手凹槽
+      const seamMat = this.clipped(m.shellDark); seamMat.color = new THREE.Color('#8b9097');
+      const n = Math.floor((binX1 - binX0) / 1.52);
+      const seams = new THREE.InstancedMesh(new THREE.BoxGeometry(0.006, 0.34, 0.012), seamMat, n);
+      const handles = new THREE.InstancedMesh(new RoundedBoxGeometry(0.22, 0.022, 0.03, 2, 0.01), seamMat, n);
+      for (let k = 0; k < n; k++) {
+        const x = binX0 + (k + 1) * 1.52;
+        seams.setMatrixAt(k, M(x, 1.88, s * (ix - 0.012), s > 0 ? 0.1 : -0.1, 0, 0));
+        handles.setMatrixAt(k, M(x - 0.76, 1.7, s * (ix - 0.014)));
       }
+      seams.userData.ceiling = true; handles.userData.ceiling = true;
+      this.cabin.add(seams, handles);
     }
     if (W > 4.6) {
-      const cb = new THREE.Mesh(new RoundedBoxGeometry(L - 8, 0.42, 1.5, 3, 0.12), bin);
-      cb.position.set(L / 2 + 1, 1.94, 0); cb.userData.ceiling = true; this.cabin.add(cb);
+      const cb = new THREE.Mesh(new RoundedBoxGeometry(L - 8, 0.44, 1.5, 4, 0.14), bin);
+      cb.position.set(L / 2 + 1, 1.95, 0); cb.userData.ceiling = true; this.cabin.add(cb);
     }
 
-    // 窗戶
-    const frameShape = roundRect(0.34, 0.46, 0.13);
-    frameShape.holes.push(roundRect(0.23, 0.34, 0.1));
-    const frameGeo = new THREE.ExtrudeGeometry(frameShape, { depth: 0.04, bevelEnabled: true, bevelThickness: 0.015, bevelSize: 0.012, bevelSegments: 3, curveSegments: 8 });
-    const paneGeo = new THREE.ShapeGeometry(roundRect(0.23, 0.34, 0.1), 8);
-    const shadeGeo = new THREE.PlaneGeometry(0.23, 0.07);
-    const frameMat = this.clipped(m.bin);
-    const shadeMat = this.clipped(m.shell);
+    // 窗戶：牆面上的凹槽窗框（漸層陰影烘焙在貼圖上）+ 窗景 + 隨機半拉的遮光板
+    const revealTex = canvasTex(256, 336, (g, w, hh) => {
+      g.clearRect(0, 0, w, hh);
+      const rr = (x, y, ww, h2, r) => { g.beginPath(); g.roundRect(x, y, ww, h2, r); };
+      // 外框：與牆同色、邊緣淡出
+      for (let i = 0; i < 18; i++) { g.fillStyle = `rgba(222,223,220,${(i + 1) / 18})`; rr(8 + i * 1.2, 8 + i * 1.2, w - 16 - i * 2.4, hh - 16 - i * 2.4, 80 - i); g.fill(); }
+      // 斜面：上方暗、下方亮（模擬凹陷）
+      const gr = g.createLinearGradient(0, 30, 0, hh - 30); gr.addColorStop(0, '#9fa3a8'); gr.addColorStop(0.5, '#c8cacb'); gr.addColorStop(1, '#eceded');
+      g.fillStyle = gr; rr(44, 44, w - 88, hh - 88, 62); g.fill();
+      g.strokeStyle = 'rgba(80,84,90,0.35)'; g.lineWidth = 2; rr(44, 44, w - 88, hh - 88, 62); g.stroke();
+      // 窗洞（透明）
+      g.globalCompositeOperation = 'destination-out'; rr(66, 70, w - 132, hh - 140, 48); g.fill(); g.globalCompositeOperation = 'source-over';
+    });
+    const revealMat = this.clipped(new THREE.MeshStandardMaterial({ map: revealTex, transparent: true, roughness: 0.55, depthWrite: false }));
+    const paneShape = roundRect(0.2, 0.3, 0.075);
     const xs = []; for (let x = 3.2; x < L - 1.6; x += 0.53) if (!ac.fixtures.some((f) => f.type === 'door' && Math.abs(f.x - x) < f.w / 2 + 0.2)) xs.push(x);
+    const shadeMat = this.clipped(new THREE.MeshStandardMaterial({ color: '#d5d6d3', roughness: 0.6 }));
+    const rnd = (k) => { const v = Math.sin(k * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
+    const WY = 1.1, wr = R + 0.036, tilt = 0.24; // 窗戶中心高度 / 該高度的牆面半徑
     for (const s of [-1, 1]) {
-      const fr = new THREE.InstancedMesh(frameGeo, frameMat, xs.length);
-      const pn = new THREE.InstancedMesh(paneGeo, this.winMat, xs.length);
-      const sh = new THREE.InstancedMesh(shadeGeo, shadeMat, xs.length);
+      const rv = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.4, 0.525).rotateX(tilt), revealMat, xs.length);
+      const pn = new THREE.InstancedMesh(new THREE.ShapeGeometry(paneShape, 8).rotateX(tilt), this.winMat, xs.length);
+      const sh = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.21, 1).rotateX(tilt), shadeMat, xs.length);
       xs.forEach((x, i) => {
-        const r = R + 0.045;
-        fr.setMatrixAt(i, M(x, 1.15, s * (r - 0.05), 0, s > 0 ? Math.PI : 0, 0));
-        pn.setMatrixAt(i, M(x, 1.15, s * (r + 0.01), 0, s > 0 ? Math.PI : 0, 0));
-        sh.setMatrixAt(i, M(x, 1.29, s * r, 0, s > 0 ? Math.PI : 0, 0));
+        const ry = s > 0 ? Math.PI : 0;
+        rv.setMatrixAt(i, M(x, WY, s * (wr - 0.014), 0, ry, 0));
+        pn.setMatrixAt(i, M(x, WY, s * (wr - 0.006), 0, ry, 0));
+        const down = rnd(x * 3 + s) < 0.3 ? 0.12 + rnd(x + s * 7) * 0.18 : 0.004; // 約三成窗戶遮光板拉下一部分
+        sh.setMatrixAt(i, M(x, WY + 0.15 - down / 2, s * (wr - 0.01), 0, ry, 0, 1, down, 1));
       });
-      this.cabin.add(fr, pn, sh);
+      rv.renderOrder = 2;
+      this.cabin.add(pn, sh, rv);
+    }
+
+    // 艙等分隔布簾（收在走道兩側）
+    const rowsByX = [...new Map(activeSeats(ac).map((s) => [s.row, s])).values()].sort((a, b) => a.x - b.x);
+    for (let i = 0; i < rowsByX.length - 1; i++) {
+      if (rowsByX[i].cls === rowsByX[i + 1].cls) continue;
+      const cx = (rowsByX[i].x + rowsByX[i + 1].x) / 2;
+      const ys2 = [...new Set(activeSeats(ac).filter((s) => s.row === rowsByX[i + 1].row).map((s) => s.y))].sort((a, b) => a - b);
+      for (let k = 0; k < ys2.length - 1; k++) {
+        if (ys2[k + 1] - ys2[k] < 0.75) continue;
+        for (const yy of [ys2[k] + 0.12, ys2[k + 1] - 0.12]) {
+          // 收束的布簾：上寬下窄、波浪皺褶
+          const cg = new THREE.PlaneGeometry(0.16, 1.62, 16, 12);
+          const cp = cg.attributes.position;
+          for (let v = 0; v < cp.count; v++) { const yv = (cp.getY(v) + 0.81) / 1.62; const xv = cp.getX(v) * (0.55 + 0.45 * yv); cp.setX(v, xv); cp.setZ(v, Math.sin(xv * 90) * 0.022); }
+          cg.computeVertexNormals();
+          const cm = new THREE.Mesh(cg, this.clipped(m.curtain));
+          cm.position.set(cx, 0.83, -yy); cm.rotation.y = Math.PI / 2; cm.castShadow = true;
+          this.cabin.add(cm);
+        }
+      }
     }
 
     // 外殼
@@ -417,29 +483,54 @@ export class View3D {
     seats.forEach((s) => { const k = `${s.cls}|${(s.w / 0.92).toFixed(2)}|${s.d.toFixed(2)}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(s); });
     groups.forEach((list, k) => {
       const [cls, w, d] = k.split('|');
-      const asset = seatAsset(cls, +w, +d);
+      const asset = seatAsset(cls, +w, +d, { screen: W > 4.6 });
       const im = new THREE.InstancedMesh(asset.geometry, asset.materials, list.length);
       list.forEach((s, i) => im.setMatrixAt(i, M(s.x, 0, -s.y)));
       im.castShadow = true; im.receiveShadow = true;
       this.cabin.add(im);
     });
-    // PSU 面板
+    // PSU 面板：每排一組（閱讀燈、空調出風口、安全帶燈），貼在行李櫃底面
     const rowXs = [...new Set(seats.map((s) => +s.x.toFixed(2)))];
     const psuMat = this.clipped(m.shell);
     this.signMat = new THREE.MeshBasicMaterial({ color: 0x333333, toneMapped: false });
-    const lampMat = new THREE.MeshStandardMaterial({ color: '#d9dde3', emissive: '#fff2d6', emissiveIntensity: 0.15 });
-    const psu = new THREE.InstancedMesh(new RoundedBoxGeometry(0.3, 0.03, 0.62, 2, 0.01), psuMat, rowXs.length * 2);
-    const lamps = new THREE.InstancedMesh(new THREE.CircleGeometry(0.018, 16), lampMat, rowXs.length * 6);
-    const signs = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.05, 0.03), this.signMat, rowXs.length * 2);
+    const lampMat = new THREE.MeshStandardMaterial({ color: '#cfd2d6', emissive: '#fff2d6', emissiveIntensity: 0.1, roughness: 0.3 });
+    const gasperMat = new THREE.MeshStandardMaterial({ color: '#8d939b', roughness: 0.35, metalness: 0.4 });
+    const psu = new THREE.InstancedMesh(new RoundedBoxGeometry(0.32, 0.02, 0.52, 2, 0.008), psuMat, rowXs.length * 2);
+    const lamps = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.022, 0.022, 0.012, 20), lampMat, rowXs.length * 6);
+    const gasp = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.02, 0.026, 0.024, 20), gasperMat, rowXs.length * 6);
+    const signs = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.06, 0.035), this.signMat, rowXs.length * 2);
     let li = 0;
     rowXs.forEach((x, i) => {
       [-1, 1].forEach((s, k) => {
-        psu.setMatrixAt(i * 2 + k, M(x, 1.622, s * (R - 0.44)));
-        for (let j = 0; j < 3; j++) lamps.setMatrixAt(li++, M(x - 0.05, 1.605, s * (R - 0.62 + j * 0.15), Math.PI / 2, 0, 0));
-        signs.setMatrixAt(i * 2 + k, M(x + 0.08, 1.605, s * (R - 0.3), Math.PI / 2, 0, 0));
+        const zc = s * (R - 0.46);
+        psu.setMatrixAt(i * 2 + k, M(x - 0.02, 1.628, zc));
+        for (let j = 0; j < 3; j++) {
+          lamps.setMatrixAt(li, M(x - 0.09, 1.616, zc + s * (-0.16 + j * 0.16)));
+          gasp.setMatrixAt(li, M(x + 0.04, 1.612, zc + s * (-0.16 + j * 0.16)));
+          li++;
+        }
+        signs.setMatrixAt(i * 2 + k, M(x + 0.12, 1.616, zc, Math.PI / 2, 0, 0));
       });
     });
-    [psu, lamps, signs].forEach((o) => { o.userData.ceiling = true; this.cabin.add(o); });
+    [psu, lamps, gasp, signs].forEach((o) => { o.userData.ceiling = true; this.cabin.add(o); });
+
+    // 光源：照明槽打向天花板、櫃底洗牆光、窗戶日光（面光源，柔和不刺眼）
+    this.areaLights = [];
+    const len = binX1 - binX0, mid = (binX0 + binX1) / 2;
+    for (const s of [-1, 1]) {
+      const ix = R - 0.74;
+      const coveL = new THREE.RectAreaLight(0xffe7c9, 7, len, 0.12);
+      coveL.position.set(mid, 2.09, s * (ix + 0.27)); coveL.lookAt(mid, 2.6, s * (ix - 0.4));
+      const wash = new THREE.RectAreaLight(0xfff1df, 3.2, len, 0.1);
+      wash.position.set(mid, 1.62, s * (ix + 0.05)); wash.lookAt(mid, 0.2, s * (R + 0.2));
+      const day = new THREE.RectAreaLight(0xdfe9ff, 1.4, L - 5, 0.4);
+      day.position.set(L / 2 + 0.6, 1.13, s * (R - 0.02)); day.lookAt(L / 2 + 0.6, 0.8, 0);
+      [coveL, wash, day].forEach((l) => { this.cabin.add(l); this.areaLights.push(l); });
+      day.userData.daylight = true; coveL.userData.base = 7; wash.userData.base = 3.2; day.userData.base = 1.4;
+    }
+    const aisle = new THREE.RectAreaLight(0xfff0dc, 3.2, len, 0.9);
+    aisle.position.set(mid, 2.28, 0); aisle.lookAt(mid, 0, 0); aisle.userData.base = 3.2;
+    this.cabin.add(aisle); this.areaLights.push(aisle);
 
     ac.fixtures.forEach((f) => this.addFixture(f, ac, accent));
 
@@ -475,7 +566,7 @@ export class View3D {
 
   // 環境反射強度：棚燈環境貼圖很亮，依視角調低，避免白色表面過曝
   applyEnvIntensity() {
-    const v = this.mode === 'fp' ? 0.32 : 0.5;
+    const v = this.mode === 'fp' ? 0.18 : 0.45;
     if (this.envI === v && this.envDirty === false) return;
     this.envI = v; this.envDirty = false;
     this.scene.traverse((o) => {
@@ -582,8 +673,8 @@ export class View3D {
     if (this.gtao) this.gtao.enabled = fp && this.quality === 'high';
     if (this.bloom) this.bloom.enabled = this.quality !== 'low';
     this.sun.castShadow = !fp && this.quality !== 'low';
-    this.hemi.intensity = fp ? 0.4 : 0.35;
-    this.sun.intensity = fp ? 0.25 : 1.7; // 機艙內不該有穿透機頂的直射陽光
+    this.hemi.intensity = fp ? 0.2 : 0.75; // 補光：避免臉部下半部過暗
+    this.sun.intensity = fp ? 0.0 : 1.7; // 機艙內不該有穿透機頂的直射陽光
   }
 
   setMode(mode) {
@@ -743,10 +834,13 @@ export class View3D {
     this.scene.fog.far = env.alt > 10000 ? 3500 : 1400;
 
     // 客艙燈光情境
-    const mood = env.lights < 0.6 ? [0.55, 0.65, 1.3] : env.lights < 0.95 ? [1.6, 1.15, 0.75] : [2.2, 1.9, 1.5];
-    (this.glow || []).forEach((g) => g.material.color.setRGB(...mood));
-    if (this.glowCeil) { this.glowCeil.emissive.setRGB(mood[0] / 2.2, mood[1] / 2.2, mood[2] / 2.2); this.glowCeil.emissiveIntensity = 0.1 + 0.15 * env.lights; }
-    this.renderer.toneMappingExposure = this.mode === 'fp' ? 0.62 + 0.18 * env.lights : 0.82;
+    const mood = env.lights < 0.6 ? [0.55, 0.7, 1.35] : env.lights < 0.95 ? [1.0, 0.82, 0.62] : [1, 1, 1];
+    const dim = env.lights < 0.6 ? 0.35 : env.lights < 0.95 ? 0.75 : 1;
+    (this.areaLights || []).forEach((l) => {
+      if (l.userData.daylight) l.intensity = l.userData.base * (env.alt > 6000 ? 1.4 : 1);
+      else { l.intensity = l.userData.base * dim; l.color.setRGB(mood[0], mood[1] * (l.userData.base === 7 ? 0.92 : 0.96), mood[2] * (l.userData.base === 7 ? 0.82 : 0.9)); }
+    });
+    (this.glowMats || []).forEach((g) => g.color.setRGB(1.1 * dim * mood[0], 0.98 * dim * mood[1], 0.8 * dim * mood[2]));
     if (this.signMat) this.signMat.color.setRGB(...(env.seatbelt ? [2.2, 1.2, 0.2] : [0.15, 0.15, 0.15]));
 
     this.drawWindow(env);
@@ -826,7 +920,7 @@ export class View3D {
       this.cabin.updateMatrixWorld(true);
       this.camera.position.setFromMatrixPosition(this.eye.matrixWorld);
       this.camera.quaternion.setFromRotationMatrix(this.eye.matrixWorld);
-      this.camera.fov = 72; this.camera.near = 0.03;
+      this.camera.fov = 66; this.camera.near = 0.03;
     } else {
       if (sim && walker && !this.orbit.manual) this.orbit.target.lerp(P(walker.x, walker.y, 0.8), Math.min(1, dt * 3));
       const o = this.orbit;
@@ -854,7 +948,7 @@ export class View3D {
     const c = this.winCanvas, g = c.getContext('2d');
     const w = c.width, h = c.height;
     const altF = Math.min(1, env.alt / 35000);
-    const horizon = h * (0.55 + altF * 0.3) - env.pitch * 3;
+    const horizon = h * (0.7 + altF * 0.15) - env.pitch * 3;
     const sky = g.createLinearGradient(0, 0, 0, Math.max(1, horizon));
     sky.addColorStop(0, `hsl(214,62%,${60 - altF * 26}%)`);
     sky.addColorStop(1, `hsl(205,50%,${88 - altF * 8}%)`);

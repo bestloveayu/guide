@@ -109,103 +109,120 @@ export function textures() {
   return TEX;
 }
 
-// ---------- 材質 ----------
-export const SEAT_FABRIC = { J: '#4a3a5c', W: '#2b5f6b', Y: '#2d4269' };
+// ---------- 材質（依真實客艙照片調整：帶灰的白、深藍布料、淺灰塑膠椅背） ----------
+export const SEAT_FABRIC = { J: '#3e3550', W: '#2a4d58', Y: '#23345a' };
 let MATS = null;
 export function materials() {
   if (MATS) return MATS;
   const T = textures();
-  const fabric = (color, sheen = '#9fb2d6') => new THREE.MeshPhysicalMaterial({ color, map: rep(T.fabricMap, 7), normalMap: rep(T.fabricN, 7), normalScale: new THREE.Vector2(0.5, 0.5), roughness: 0.92, sheen: 0.7, sheenRoughness: 0.6, sheenColor: new THREE.Color(sheen) });
+  const fabric = (color, sheen = '#8fa3c8') => new THREE.MeshPhysicalMaterial({ color, map: rep(T.fabricMap, 9), normalMap: rep(T.fabricN, 9), normalScale: new THREE.Vector2(0.55, 0.55), roughness: 0.95, sheen: 0.8, sheenRoughness: 0.55, sheenColor: new THREE.Color(sheen) });
   MATS = {
-    fabric: { Y: fabric(SEAT_FABRIC.Y), W: fabric(SEAT_FABRIC.W, '#9fd0d6'), J: new THREE.MeshPhysicalMaterial({ color: SEAT_FABRIC.J, map: rep(T.leatherMap, 5), normalMap: rep(T.leatherN, 5), normalScale: new THREE.Vector2(0.35, 0.35), roughness: 0.48, clearcoat: 0.25, clearcoatRoughness: 0.5 }) },
-    headrest: new THREE.MeshPhysicalMaterial({ color: '#ebe6da', map: rep(T.fabricMap, 9), normalMap: rep(T.fabricN, 9), normalScale: new THREE.Vector2(0.4, 0.4), roughness: 0.95, sheen: 0.4, sheenColor: new THREE.Color('#ffffff') }),
-    shell: new THREE.MeshStandardMaterial({ color: '#cdd2d9', roughness: 0.42, normalMap: rep(T.plasticN, 4), normalScale: new THREE.Vector2(0.15, 0.15) }),
-    shellDark: new THREE.MeshStandardMaterial({ color: '#3c4350', roughness: 0.5 }),
-    metal: new THREE.MeshStandardMaterial({ color: '#b4bac4', metalness: 0.85, roughness: 0.32 }),
-    screen: new THREE.MeshPhysicalMaterial({ color: '#05070b', roughness: 0.08, clearcoat: 1, emissive: '#1d3d66', emissiveIntensity: 0.6 }),
+    fabric: { Y: fabric(SEAT_FABRIC.Y), W: fabric(SEAT_FABRIC.W, '#9cc8d0'), J: new THREE.MeshPhysicalMaterial({ color: SEAT_FABRIC.J, map: rep(T.leatherMap, 6), normalMap: rep(T.leatherN, 6), normalScale: new THREE.Vector2(0.35, 0.35), roughness: 0.5, clearcoat: 0.2, clearcoatRoughness: 0.5 }) },
+    headrest: new THREE.MeshPhysicalMaterial({ color: '#dedcd5', map: rep(T.fabricMap, 14), normalMap: rep(T.fabricN, 14), normalScale: new THREE.Vector2(0.35, 0.35), roughness: 0.97, sheen: 0.5, sheenColor: new THREE.Color('#ffffff') }),
+    shell: new THREE.MeshStandardMaterial({ color: '#b9bec6', roughness: 0.48, normalMap: rep(T.plasticN, 6), normalScale: new THREE.Vector2(0.12, 0.12) }),
+    tray: new THREE.MeshStandardMaterial({ color: '#a9aeb7', roughness: 0.5 }),
+    shellDark: new THREE.MeshStandardMaterial({ color: '#3a3f48', roughness: 0.55 }),
+    metal: new THREE.MeshStandardMaterial({ color: '#8d939c', metalness: 0.8, roughness: 0.38 }),
+    screen: new THREE.MeshPhysicalMaterial({ color: '#06080c', roughness: 0.1, clearcoat: 1, emissive: '#16304f', emissiveIntensity: 0.45 }),
     wood: new THREE.MeshStandardMaterial({ color: '#b39b7a', roughness: 0.55 }),
-    wall: new THREE.MeshStandardMaterial({ color: '#eceef2', roughness: 0.55, normalMap: rep(T.plasticN, 6), normalScale: new THREE.Vector2(0.12, 0.12), side: THREE.DoubleSide }),
-    bin: new THREE.MeshPhysicalMaterial({ color: '#f5f5f2', roughness: 0.32, clearcoat: 0.35, clearcoatRoughness: 0.3, side: THREE.DoubleSide }),
-    ceiling: new THREE.MeshStandardMaterial({ color: '#f3f4f7', roughness: 0.7, side: THREE.DoubleSide }),
-    kick: new THREE.MeshStandardMaterial({ color: '#7c8494', roughness: 0.6, side: THREE.DoubleSide }),
-    carpet: new THREE.MeshStandardMaterial({ map: T.carpet, normalMap: T.carpetN, normalScale: new THREE.Vector2(0.6, 0.6), roughness: 1 }),
+    wall: new THREE.MeshStandardMaterial({ color: '#dcddda', roughness: 0.6, side: THREE.DoubleSide }),
+    bin: new THREE.MeshStandardMaterial({ color: '#d9dad7', roughness: 0.38, side: THREE.DoubleSide }),
+    binUnder: new THREE.MeshStandardMaterial({ color: '#b8bcbf', roughness: 0.6, side: THREE.DoubleSide }),
+    ceiling: new THREE.MeshStandardMaterial({ color: '#e2e2de', roughness: 0.75, side: THREE.DoubleSide }),
+    kick: new THREE.MeshStandardMaterial({ color: '#6f7682', roughness: 0.65, side: THREE.DoubleSide }),
+    carpet: new THREE.MeshStandardMaterial({ map: T.carpet, normalMap: T.carpetN, normalScale: new THREE.Vector2(0.7, 0.7), roughness: 1 }),
     steel: new THREE.MeshStandardMaterial({ color: '#bfc5ce', metalness: 0.75, roughness: 0.38, map: rep(T.brushMap, 1), normalMap: rep(T.brushN, 1), normalScale: new THREE.Vector2(0.08, 0.08) }),
-    hull: new THREE.MeshPhysicalMaterial({ color: '#f6f8fb', roughness: 0.3, clearcoat: 0.8, clearcoatRoughness: 0.15, side: THREE.DoubleSide }),
+    hull: new THREE.MeshPhysicalMaterial({ color: '#f2f4f7', roughness: 0.32, clearcoat: 0.7, clearcoatRoughness: 0.2, side: THREE.DoubleSide }),
+    curtain: new THREE.MeshPhysicalMaterial({ color: '#1d2a48', roughness: 0.95, sheen: 0.6, sheenColor: new THREE.Color('#6d84b8'), side: THREE.DoubleSide }),
     rubber: new THREE.MeshStandardMaterial({ color: '#1e2026', roughness: 0.9 }),
   };
   return MATS;
 }
 
-// ---------- 經濟/豪經艙座椅：由側面輪廓擠出，圓角平滑 ----------
-function seatProfile() {
-  const s = new THREE.Shape();
-  s.moveTo(-0.25, 0.37);
-  s.quadraticCurveTo(-0.29, 0.40, -0.28, 0.46);
-  s.quadraticCurveTo(-0.26, 0.52, -0.18, 0.52);
-  s.lineTo(0.10, 0.50);
-  s.quadraticCurveTo(0.15, 0.50, 0.16, 0.56);
-  s.lineTo(0.22, 1.02);
-  s.quadraticCurveTo(0.24, 1.17, 0.31, 1.17);
-  s.quadraticCurveTo(0.35, 1.16, 0.34, 1.08);
-  s.lineTo(0.28, 0.48);
-  s.quadraticCurveTo(0.26, 0.38, 0.16, 0.37);
-  s.lineTo(-0.25, 0.37);
-  return s;
-}
-function shellProfile() {
-  const s = new THREE.Shape();
-  s.moveTo(0.30, 0.42); s.lineTo(0.355, 1.06); s.quadraticCurveTo(0.36, 1.12, 0.33, 1.13); s.lineTo(0.315, 1.13); s.lineTo(0.26, 0.42); s.lineTo(0.30, 0.42);
-  return s;
-}
+// ---------- 座椅 ----------
 const ni = (g) => (g.index ? g.toNonIndexed() : g);
 function keep(g) { const out = ni(g); for (const k of Object.keys(out.attributes)) if (!['position', 'normal', 'uv'].includes(k)) out.deleteAttribute(k); return out; }
 
+// 椅背正面輪廓（寬 × 高，在 z-y 平面），上緣圓角、肩部略收
+function backShape(bw, y0, y1, rTop = 0.085, taper = 0.03) {
+  const s = new THREE.Shape();
+  const hb = bw / 2, ht = bw / 2 - taper;
+  s.moveTo(-hb, y0);
+  s.lineTo(hb, y0);
+  s.lineTo(ht, y1 - rTop);
+  s.quadraticCurveTo(ht, y1, ht - rTop, y1);
+  s.lineTo(-ht + rTop, y1);
+  s.quadraticCurveTo(-ht, y1, -ht, y1 - rTop);
+  s.lineTo(-hb, y0);
+  return s;
+}
+// 將 z-y 平面的形狀沿 +x 擠出（厚度 t），回傳幾何
+function slab(shape, t, bevel = 0.02, segs = 4) {
+  const g = new THREE.ExtrudeGeometry(shape, { depth: t, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel * 0.9, bevelSegments: segs, curveSegments: 12 });
+  g.rotateY(Math.PI / 2); // 擠出方向 → +x，形狀 x → -z
+  return g;
+}
+// 繞座位樞紐（後傾）
+function recline(g, pivotX, pivotY, ang) { g.translate(-pivotX, -pivotY, 0); g.rotateZ(-ang); g.translate(pivotX, pivotY, 0); return g; }
+
 // 回傳 { geometry（含材質群組）, materials }，原點在地板、面向 -x
-export function seatAsset(cls, w, d) {
+export function seatAsset(cls, w, d, opts = {}) {
   const m = materials();
-  const groups = { fabric: [], head: [], shell: [], metal: [], screen: [], dark: [] };
-  const sx = d / 0.6; // 依座位深度縮放
-  const cw = w * 0.86;
+  const groups = { fabric: [], head: [], shell: [], tray: [], metal: [], screen: [], dark: [] };
+  const bw = w * 0.9;
+  const backX = d * 0.36; // 椅背前緣 x
+  const ang = cls === 'J' ? 0.2 : 0.16;
   if (cls === 'J') {
-    const pf = new THREE.Shape();
-    pf.moveTo(-0.32, 0.36); pf.quadraticCurveTo(-0.38, 0.42, -0.34, 0.5); pf.lineTo(0.12, 0.5);
-    pf.quadraticCurveTo(0.2, 0.5, 0.22, 0.6); pf.lineTo(0.3, 1.25); pf.quadraticCurveTo(0.33, 1.38, 0.42, 1.36); pf.lineTo(0.42, 0.5); pf.quadraticCurveTo(0.4, 0.36, 0.3, 0.36); pf.lineTo(-0.32, 0.36);
-    const body = new THREE.ExtrudeGeometry(pf, { depth: cw * 0.86, bevelEnabled: true, bevelThickness: 0.04, bevelSize: 0.035, bevelSegments: 4, curveSegments: 10 });
-    body.translate(0, 0, -cw * 0.43); body.scale(sx * 0.95, 1, 1);
-    groups.fabric.push(body);
+    // 商務艙：寬大皮椅 + 側邊殼體 + 腳凳
+    const back = slab(backShape(bw * 0.86, 0.5, 1.32, 0.12, 0.04), 0.14, 0.04); back.translate(backX - 0.02, 0, 0); recline(back, backX, 0.5, ang); groups.fabric.push(back);
+    const cush = new RoundedBoxGeometry(d * 0.9, 0.16, bw * 0.84, 4, 0.06); cush.translate(-0.02, 0.46, 0); groups.fabric.push(cush);
+    const head = slab(backShape(bw * 0.88, 1.08, 1.34, 0.12, 0.04), 0.18, 0.02); head.translate(backX - 0.04, 0, 0); recline(head, backX, 0.5, ang); groups.head.push(head);
     for (const side of [-1, 1]) {
-      const wall = new RoundedBoxGeometry(d * 1.15, 1.05, 0.08, 3, 0.03); wall.translate(0.02, 0.52, side * (w / 2 - 0.04)); groups.shell.push(wall);
-      const top = new RoundedBoxGeometry(d * 0.7, 0.04, 0.2, 2, 0.015); top.translate(-0.05, 0.72, side * (w / 2 - 0.13)); groups.dark.push(top);
+      const wall = new RoundedBoxGeometry(d * 1.15, 1.05, 0.07, 3, 0.03); wall.translate(0.02, 0.52, side * (w / 2 - 0.035)); groups.shell.push(wall);
+      const top = new RoundedBoxGeometry(d * 0.75, 0.04, 0.18, 2, 0.015); top.translate(-0.05, 0.72, side * (w / 2 - 0.12)); groups.dark.push(top);
     }
-    const ott = new RoundedBoxGeometry(0.3, 0.32, w * 0.5, 3, 0.05); ott.translate(-d * 0.68, 0.16, 0); groups.shell.push(ott);
-    const head = new RoundedBoxGeometry(0.1, 0.24, cw * 0.55, 3, 0.04); head.rotateZ(-0.12); head.translate(sx * 0.95 * 0.31, 1.26, 0); groups.head.push(head);
-    const scr = new THREE.PlaneGeometry(0.42, 0.26); scr.rotateY(Math.PI / 2); scr.translate(-d * 0.95, 1.0, 0); groups.screen.push(scr);
+    const ott = new RoundedBoxGeometry(0.3, 0.3, w * 0.5, 3, 0.05); ott.translate(-d * 0.7, 0.15, 0); groups.shell.push(ott);
+    const base = new RoundedBoxGeometry(d * 0.8, 0.36, bw * 0.7, 2, 0.03); base.translate(0, 0.18, 0); groups.shell.push(base);
+    const scr = new THREE.PlaneGeometry(0.4, 0.25); scr.rotateY(Math.PI / 2); scr.translate(-d * 0.98, 1.0, 0); groups.screen.push(scr);
   } else {
-    const body = new THREE.ExtrudeGeometry(seatProfile(), { depth: cw - 0.06, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.028, bevelSegments: 4, curveSegments: 10 });
-    body.translate(0, 0, -(cw - 0.06) / 2); body.scale(sx, 1, 1);
-    groups.fabric.push(body);
-    const shell = new THREE.ExtrudeGeometry(shellProfile(), { depth: cw, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 2, curveSegments: 6 });
-    shell.translate(0, 0, -cw / 2); shell.scale(sx, 1, 1);
-    groups.shell.push(shell);
-    // 頭枕套
-    const head = new RoundedBoxGeometry(0.03, 0.2, cw * 0.68, 2, 0.012); head.rotateZ(-0.13); head.translate(0.215 * sx, 1.02, 0); groups.head.push(head);
-    // 椅背螢幕與餐桌
-    const scr = new THREE.PlaneGeometry(0.16, 0.24); scr.rotateZ(0.13); scr.rotateY(Math.PI / 2); scr.translate(0.348 * sx + 0.004, 0.95, 0); groups.screen.push(scr);
-    const tray = new RoundedBoxGeometry(0.012, 0.22, cw * 0.82, 2, 0.005); tray.rotateZ(0.1); tray.translate(0.326 * sx + 0.006, 0.7, 0); groups.dark.push(tray);
-    const pocket = new RoundedBoxGeometry(0.03, 0.14, cw * 0.7, 2, 0.01); pocket.translate(0.3 * sx, 0.5, 0); groups.dark.push(pocket);
-    // 扶手
+    // 經濟/豪經艙：薄型椅背（布面）+ 後側淺灰塑膠殼 + 大片頭枕套（照片中最明顯的特徵）
+    const fabT = 0.075, shellT = 0.022;
+    const back = slab(backShape(bw, 0.5, 1.12), fabT, 0.025); back.translate(backX, 0, 0); recline(back, backX, 0.5, ang); groups.fabric.push(back);
+    // 腰靠鼓起
+    const lumbar = new RoundedBoxGeometry(0.05, 0.22, bw * 0.8, 3, 0.022); lumbar.translate(backX - 0.01, 0.66, 0); recline(lumbar, backX, 0.5, ang); groups.fabric.push(lumbar);
+    // 後殼：比椅背略寬，涵蓋下 3/4
+    const sx0 = backX + fabT + 0.045;
+    const shell = slab(backShape(bw + 0.02, 0.42, 1.0, 0.06, 0.02), shellT, 0.012, 3); shell.translate(sx0, 0, 0); recline(shell, backX, 0.5, ang); groups.shell.push(shell);
+    // 餐桌（淺凹的圓角板）與扣鎖
+    const trayS = new THREE.Shape(); const tw = bw * 0.78, th = 0.26; const rr = 0.03;
+    trayS.moveTo(-tw / 2 + rr, 0); trayS.lineTo(tw / 2 - rr, 0); trayS.quadraticCurveTo(tw / 2, 0, tw / 2, rr); trayS.lineTo(tw / 2, th - rr); trayS.quadraticCurveTo(tw / 2, th, tw / 2 - rr, th); trayS.lineTo(-tw / 2 + rr, th); trayS.quadraticCurveTo(-tw / 2, th, -tw / 2, th - rr); trayS.lineTo(-tw / 2, rr); trayS.quadraticCurveTo(-tw / 2, 0, -tw / 2 + rr, 0);
+    const tray = slab(trayS, 0.008, 0.004, 2); tray.translate(sx0 + shellT + 0.012, 0.6, 0); recline(tray, backX, 0.5, ang); groups.tray.push(tray);
+    const latch = new RoundedBoxGeometry(0.014, 0.018, 0.06, 2, 0.006); latch.translate(sx0 + shellT + 0.028, 0.885, 0); recline(latch, backX, 0.5, ang); groups.dark.push(latch);
+    // 椅背置物袋
+    const pocket = new RoundedBoxGeometry(0.025, 0.13, bw * 0.74, 2, 0.01); pocket.translate(sx0 + shellT + 0.02, 0.5, 0); recline(pocket, backX, 0.5, ang); groups.fabric.push(pocket);
+    if (opts.screen || cls === 'W') {
+      const scr = new RoundedBoxGeometry(0.012, 0.16, 0.25, 2, 0.006); scr.translate(sx0 + shellT + 0.02, 0.93, 0); recline(scr, backX, 0.5, ang); groups.screen.push(scr);
+      const bez = new RoundedBoxGeometry(0.012, 0.19, 0.29, 2, 0.01); bez.translate(sx0 + shellT + 0.014, 0.93, 0); recline(bez, backX, 0.5, ang); groups.dark.push(bez);
+    }
+    // 頭枕套：覆蓋椅背上段正反兩面
+    const coverT = fabT + 0.045 + shellT + 0.03;
+    const cover = slab(backShape(bw + 0.06, 0.9, 1.16, 0.1, 0.028), coverT + 0.02, 0.01, 2); cover.translate(backX - 0.03, 0, 0); recline(cover, backX, 0.5, ang); groups.head.push(cover);
+    // 椅墊（前緣略高）
+    const cush = new RoundedBoxGeometry(d * 0.86, 0.12, bw * 0.98, 4, 0.045); cush.rotateZ(0.04); cush.translate(-0.03, 0.455, 0); groups.fabric.push(cush);
+    const pan = new RoundedBoxGeometry(d * 0.8, 0.05, bw * 0.92, 2, 0.015); pan.translate(-0.02, 0.385, 0); groups.shell.push(pan);
+    // 扶手（深灰）與扶手側板
     for (const side of [-1, 1]) {
-      const arm = new RoundedBoxGeometry(0.4, 0.045, 0.05, 2, 0.02); arm.translate(-0.02, 0.655, side * (w / 2 - 0.01)); groups.dark.push(arm);
-      const post = new THREE.CylinderGeometry(0.012, 0.012, 0.18, 8); post.translate(0.08, 0.56, side * (w / 2 - 0.01)); groups.metal.push(post);
+      const arm = new RoundedBoxGeometry(0.42, 0.05, 0.05, 3, 0.022); arm.translate(-0.03, 0.66, side * (w / 2)); groups.dark.push(arm);
+      const post = new RoundedBoxGeometry(0.05, 0.25, 0.035, 2, 0.012); post.translate(0.12, 0.53, side * (w / 2)); groups.dark.push(post);
     }
-    // 椅腳與橫桿
-    for (const lx of [-0.18 * sx, 0.18 * sx]) {
-      const leg = new THREE.CylinderGeometry(0.018, 0.022, 0.38, 8); leg.translate(lx, 0.19, w * 0.32); groups.metal.push(leg);
-      const leg2 = leg.clone(); leg2.translate(0, 0, -w * 0.64); groups.metal.push(leg2);
+    // 椅腳、橫桿
+    for (const lx of [-d * 0.28, d * 0.22]) {
+      for (const lz of [w * 0.38, -w * 0.38]) { const leg = new THREE.CylinderGeometry(0.016, 0.02, 0.37, 10); leg.translate(lx, 0.185, lz); groups.metal.push(leg); }
     }
-    const rail = new THREE.CylinderGeometry(0.02, 0.02, w * 0.95, 8); rail.rotateX(Math.PI / 2); rail.translate(0, 0.36, 0); groups.metal.push(rail);
+    for (const lx of [-d * 0.2, d * 0.15]) { const rail = new THREE.CylinderGeometry(0.018, 0.018, w * 1.0, 10); rail.rotateX(Math.PI / 2); rail.translate(lx, 0.35, 0); groups.metal.push(rail); }
+    const bag = new RoundedBoxGeometry(0.36, 0.05, w * 0.6, 2, 0.02); bag.translate(-0.02, 0.33, 0); groups.dark.push(bag); // 救生衣袋
   }
-  const order = [['fabric', m.fabric[cls] || m.fabric.Y], ['head', m.headrest], ['shell', m.shell], ['metal', m.metal], ['screen', m.screen], ['dark', m.shellDark]];
+  const order = [['fabric', m.fabric[cls] || m.fabric.Y], ['head', m.headrest], ['shell', m.shell], ['tray', m.tray], ['metal', m.metal], ['screen', m.screen], ['dark', m.shellDark]];
   const geos = [], mats = [];
   order.forEach(([k, mat]) => { if (groups[k].length) { geos.push(mergeGeometries(groups[k].map(keep), false)); mats.push(mat); } });
   return { geometry: mergeGeometries(geos, true), materials: mats };
@@ -225,48 +242,82 @@ const cap = (r, l, seg = 10) => new THREE.CapsuleGeometry(r, l, 6, seg);
 const sph = (r, ws = 18, hs = 14) => new THREE.SphereGeometry(r, ws, hs);
 const torsoLathe = (pts, seg = 20) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), seg);
 
-const SHIRTS = ['#b8664c', '#466d99', '#6f8f73', '#c99b45', '#7c66a3', '#c98597', '#525f6d', '#d9d0bd', '#3b7f7a', '#a24f3e', '#e8e6e1', '#2f3a4c'];
+const SHIRTS = ['#e9e8e3', '#9fb7d3', '#1e2128', '#5a6170', '#2c3b57', '#c9b79a', '#8f2f35', '#e8dfd0', '#46525f', '#b8c4b0', '#d7d4cc', '#3a3a40'];
 const PANTS = ['#2b2f39', '#43474f', '#5a4b3b', '#2f405a', '#6a6e76', '#3a3530'];
-const SKINS = ['#f0c8a4', '#deab80', '#c48a61', '#8e5d3f', '#f5d6bd', '#e9b994'];
-const HAIRS = ['#1d1510', '#36261b', '#5f432c', '#9a7449', '#252525', '#4a3626'];
+const SKINS = ['#d9ad8c', '#cf9e7b', '#c08966', '#a8724f', '#e2b897', '#bf8f70'];
+const HAIRS = ['#151110', '#1f1814', '#2b211b', '#3d2c20', '#4a3626', '#121212'];
 
-export const PAX_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78 });
+export const PAX_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72 });
 
-// 坐姿旅客（面向 -x）
+// 坐姿旅客（面向 -x）：頭髮完整包覆後腦（從走道多半看到的是後腦與肩膀），部分旅客低頭看手機
 export function passengerGeometry(p) {
   const h = hash(p.seat + p.name);
+  const r = rng(h);
   const shirt = SHIRTS[h % SHIRTS.length], pants = PANTS[(h >>> 4) % PANTS.length];
   let skin = SKINS[(h >>> 8) % SKINS.length], hair = HAIRS[(h >>> 12) % HAIRS.length];
-  if (p.type === 'elder') hair = '#d9d6cf';
-  if (p.type === 'drunk') skin = '#e8a08e';
-  if (p.type === 'medical') skin = '#e9e3d8';
-  const longHair = (h >>> 16) % 3 === 0;
-  const parts = [];
+  if (p.type === 'elder') hair = r() > 0.5 ? '#c9c6bf' : '#8c8780';
+  if (p.type === 'drunk') skin = '#d9927e';
+  if (p.type === 'medical') skin = '#dcd3c6';
+  const style = (h >>> 16) % 4; // 0 短髮 1 及肩 2 馬尾/長髮 3 平頭
+  const reading = r() < 0.35;
+  const glasses = r() < 0.3 || p.type === 'elder';
+  const body = [], head = [];
   // 腿
-  for (const z of [-0.09, 0.09]) {
-    parts.push(colored(cap(0.075, 0.3), pants, M(-0.1, 0.58, z, 0, 0, Math.PI / 2)));
-    parts.push(colored(cap(0.058, 0.32), pants, M(-0.3, 0.32, z)));
-    parts.push(colored(new RoundedBoxGeometry(0.22, 0.07, 0.09, 2, 0.03), '#23252b', M(-0.34, 0.05, z)));
+  for (const z of [-0.095, 0.095]) {
+    body.push(colored(cap(0.072, 0.3, 12), pants, M(-0.08, 0.57, z, 0, 0, Math.PI / 2)));
+    body.push(colored(cap(0.056, 0.33, 12), pants, M(-0.3, 0.31, z)));
+    body.push(colored(new RoundedBoxGeometry(0.24, 0.07, 0.095, 2, 0.03), '#1f2026', M(-0.34, 0.04, z)));
   }
-  parts.push(colored(sph(0.16, 16, 10), pants, M(0.1, 0.6, 0, 0, 0, 0, 0.9, 0.6, 1.2)));
-  // 軀幹（略向後靠）
-  parts.push(colored(torsoLathe([[0.0, 0], [0.15, 0.02], [0.14, 0.18], [0.17, 0.36], [0.18, 0.44], [0.12, 0.52], [0.0, 0.54]]), shirt, M(0.12, 0.6, 0, 0, 0, -0.12, 0.72, 1, 1.12)));
-  // 手臂（前臂放在扶手上）
+  body.push(colored(sph(0.17, 18, 12), pants, M(0.08, 0.58, 0, 0, 0, 0, 0.85, 0.55, 1.15)));
+  // 軀幹：肩寬約 0.42 m，靠在椅背上
+  body.push(colored(torsoLathe([[0.0, 0], [0.14, 0.02], [0.135, 0.16], [0.16, 0.34], [0.175, 0.44], [0.15, 0.5], [0.07, 0.545], [0, 0.55]], 24), shirt, M(0.13, 0.6, 0, 0, 0, -0.16, 0.66, 1, 1.22)));
+  body.push(colored(new THREE.TorusGeometry(0.055, 0.02, 8, 18), shadeHex(shirt, 1.12), M(0.16, 1.14, 0, Math.PI / 2, 0, 0)));
+  // 手臂
   for (const s of [-1, 1]) {
-    parts.push(colored(cap(0.048, 0.22), shirt, M(0.13, 0.9, s * 0.2, s * 0.08, 0, 0.25)));
-    parts.push(colored(cap(0.042, 0.22), shirt, M(-0.02, 0.72, s * 0.21, 0, 0, Math.PI / 2 - 0.15)));
-    parts.push(colored(sph(0.045, 10, 8), skin, M(-0.17, 0.7, s * 0.21, 0, 0, 0, 1.2, 0.8, 1)));
+    body.push(colored(cap(0.05, 0.22, 10), shirt, M(0.14, 0.92, s * 0.2, s * 0.06, 0, 0.22)));
+    if (reading) {
+      body.push(colored(cap(0.042, 0.2, 10), shirt, M(0.0, 0.8, s * 0.13, s * -0.5, 0, Math.PI / 2 - 0.6)));
+      body.push(colored(sph(0.042, 12, 10), skin, M(-0.1, 0.88, s * 0.06, 0, 0, 0, 1.1, 0.8, 1)));
+    } else {
+      body.push(colored(cap(0.042, 0.22, 10), shirt, M(-0.02, 0.71, s * 0.205, 0, 0, Math.PI / 2 - 0.12)));
+      body.push(colored(sph(0.042, 12, 10), skin, M(-0.17, 0.69, s * 0.205, 0, 0, 0, 1.2, 0.75, 1)));
+    }
   }
-  // 頭頸
-  parts.push(colored(cap(0.045, 0.06), skin, M(0.15, 1.17, 0)));
-  parts.push(colored(sph(0.105), skin, M(0.13, 1.31, 0, 0, 0, -0.08, 0.95, 1.12, 0.92)));
-  parts.push(colored(sph(0.02, 8, 6), skin, M(0.03, 1.3, 0)));
-  for (const s of [-1, 1]) parts.push(colored(sph(0.016, 8, 6), '#2a2220', M(0.04, 1.34, s * 0.035)));
-  parts.push(colored(new THREE.SphereGeometry(0.113, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.58), hair, M(0.15, 1.33, 0, 0, 0, 0.35, 1, 1.05, 0.98)));
-  if (longHair) parts.push(colored(cap(0.085, 0.16), hair, M(0.22, 1.2, 0, 0, 0, 0.15, 0.7, 1, 1.15)));
-  if (p.type === 'vip') parts.push(colored(new RoundedBoxGeometry(0.02, 0.24, 0.05, 2, 0.008), '#b38d2c', M(0.02, 0.98, 0, 0, 0, -0.1)));
-  if (p.type === 'elder') for (const s of [-1, 1]) parts.push(colored(new THREE.TorusGeometry(0.022, 0.004, 6, 14), '#8a8f99', M(0.03, 1.34, s * 0.035, 0, Math.PI / 2, 0)));
-  const g = mergeGeometries(parts, false);
+  if (reading) body.push(colored(new RoundedBoxGeometry(0.075, 0.008, 0.15, 2, 0.004), '#15171c', M(-0.12, 0.9, 0, 0, 0, 0.9)));
+  // 頸
+  body.push(colored(cap(0.046, 0.07, 12), skin, M(0.16, 1.17, 0)));
+  // 頭部（以頸部為樞紐可低頭）
+  const HY = 1.32, HX = 0.15;
+  head.push(colored(sph(0.1, 28, 20), skin, M(HX, HY, 0, 0, 0, 0, 0.98, 1.16, 0.8)));
+  head.push(colored(sph(0.05, 14, 10), skin, M(HX - 0.03, HY - 0.075, 0, 0, 0, 0, 1.1, 0.7, 1.15))); // 下顎
+  head.push(colored(cap(0.012, 0.03, 8), shadeHex(skin, 0.95), M(HX - 0.098, HY - 0.005, 0, 0, 0, 0.15)));  // 鼻
+  for (const s of [-1, 1]) {
+    head.push(colored(sph(0.011, 10, 8), '#1c1614', M(HX - 0.083, HY + 0.02, s * 0.034)));
+    head.push(colored(new RoundedBoxGeometry(0.008, 0.007, 0.036, 1, 0.003), shadeHex(hair, 0.9), M(HX - 0.088, HY + 0.045, s * 0.035)));
+    head.push(colored(sph(0.022, 10, 8), skin, M(HX + 0.005, HY - 0.0, s * 0.078, 0, 0, 0, 0.6, 1.2, 0.5)));
+  }
+  head.push(colored(cap(0.007, 0.026, 6), '#a85d55', M(HX - 0.09, HY - 0.045, 0, Math.PI / 2, 0, 0)));
+  // 頭髮：頂部 + 後腦完整覆蓋，臉部留空
+  const HR = 0.108;
+  const front = 1.3;
+  head.push(colored(new THREE.SphereGeometry(HR, 28, 16, front, Math.PI * 2 - front * 2, 0, Math.PI * (style === 3 ? 0.42 : 0.5)), hair, M(HX + 0.006, HY + 0.012, 0, 0, 0, 0, 1.0, 1.12, 0.84)));
+  head.push(colored(new THREE.SphereGeometry(HR, 28, 16, 0, Math.PI * 2, 0, Math.PI * 0.32), hair, M(HX + 0.004, HY + 0.016, 0, 0, 0, 0.12, 1.0, 1.12, 0.84)));
+  const backLen = style === 3 ? 0.55 : style === 0 ? 0.6 : 0.68;
+  head.push(colored(new THREE.SphereGeometry(HR + 0.003, 24, 14, Math.PI - 0.78, 1.56, Math.PI * 0.3, Math.PI * (backLen - 0.3)), hair, M(HX + 0.01, HY + 0.01, 0, 0, 0, 0, 1.0, 1.15, 0.86)));
+  if (style === 1) head.push(colored(new THREE.CylinderGeometry(0.1, 0.11, 0.12, 22, 1, true, -Math.PI / 2 - 1.2, Math.PI + 2.4), hair, M(HX + 0.015, HY - 0.08, 0, 0, 0, 0, 0.95, 1, 0.92)));
+  if (style === 2) { head.push(colored(cap(0.04, 0.12, 10), hair, M(HX + 0.12, HY - 0.06, 0, 0, 0, 0.35))); head.push(colored(sph(0.03, 10, 8), shadeHex(hair, 0.8), M(HX + 0.11, HY + 0.02, 0))); }
+  if (glasses) {
+    for (const s of [-1, 1]) head.push(colored(new THREE.TorusGeometry(0.022, 0.0035, 6, 18), '#24262b', M(HX - 0.092, HY + 0.02, s * 0.034, 0, Math.PI / 2, 0)));
+    head.push(colored(cap(0.003, 0.02, 4), '#24262b', M(HX - 0.094, HY + 0.022, 0, Math.PI / 2, 0, 0)));
+  }
+  const hg = mergeGeometries(head, false);
+  hg.translate(-0.16, -1.2, 0);
+  hg.rotateZ(reading ? 0.38 : (r() - 0.5) * 0.12); // 低頭
+  hg.rotateY((r() - 0.5) * 0.35);
+  hg.translate(0.16, 1.2, 0);
+  const extras = [];
+  if (p.type === 'vip') extras.push(colored(new RoundedBoxGeometry(0.02, 0.22, 0.05, 2, 0.008), '#a8842b', M(0.04, 0.98, 0, 0, 0, -0.16)));
+  const g = mergeGeometries([...body, hg, ...extras], false);
   if (p.type === 'child') { g.translate(0.1, 0, 0); g.scale(0.7, 0.7, 0.7); g.translate(-0.1, 0.12, 0); }
   return g;
 }
