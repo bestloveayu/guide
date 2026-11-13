@@ -9,9 +9,10 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
+import { Reflector } from 'three/addons/objects/Reflector.js';
 RectAreaLightUniformsLib.init();
 import { PAX_TYPES, PRIORITY } from './data.js';
-import { activeSeats, binDoors, roomLayout } from './layout.js';
+import { activeSeats, binDoors, roomLayout, LAV, lavLayout } from './layout.js';
 import { M, materials, textures, seatAsset, passengerGeometry, PAX_MAT, makeCrew as buildCrew, makeCart, makeMealTray } from './art.js';
 
 export const makeCrew = buildCrew;
@@ -280,6 +281,8 @@ export class View3D {
     this.glow = [];
     this.oxyBuilt = new Map();
     this.cockpitPanel = null;
+    this.mirrors = [];
+    this.serveAnim = null; this.serveQueue = [];
     const m = materials();
     const L = ac.length, W = ac.width, R = W / 2;
     const uni = prof.uniform;
@@ -703,21 +706,34 @@ export class View3D {
     add(new THREE.PlaneGeometry(D - 2 * T, h - T), inner, W / 2 - T - 0.001, (h - T) / 2, 0, -Math.PI / 2);
     const floor = add(new THREE.PlaneGeometry(W - 2 * T, D - 2 * T), this.clipped(new THREE.MeshStandardMaterial({ color: '#7b8088', roughness: 0.6 })), 0, 0.01, 0); floor.rotation.x = -Math.PI / 2;
     // 馬桶（左後角）
-    const tx = -W / 2 + 0.26, tz = -D / 2 + 0.3;
-    add(new RoundedBoxGeometry(0.34, 0.36, 0.42, 4, 0.08), m.porcelain, tx, 0.18, tz);
+    const tx = LAV.toilet.x(W), tz = LAV.toilet.z(D);
+    add(new RoundedBoxGeometry(LAV.toilet.w, 0.36, LAV.toilet.d, 4, 0.08), m.porcelain, tx, 0.18, tz);
     const rim = add(new THREE.TorusGeometry(0.15, 0.028, 12, 32), m.porcelain, tx, 0.39, tz + 0.03); rim.rotation.x = Math.PI / 2; rim.scale.set(1, 1.25, 1);
     const water = add(new THREE.CircleGeometry(0.12, 24), new THREE.MeshStandardMaterial({ color: '#9fb6c9', roughness: 0.05, metalness: 0.2 }), tx, 0.33, tz + 0.03); water.rotation.x = -Math.PI / 2; water.scale.set(1, 1.25, 1);
     const lid = add(new RoundedBoxGeometry(0.32, 0.4, 0.03, 3, 0.012), m.porcelain, tx, 0.6, -D / 2 + T + 0.04); lid.rotation.x = -0.12;
     add(new RoundedBoxGeometry(0.06, 0.06, 0.02, 2, 0.01), m.chrome, tx + 0.22, 1.0, -D / 2 + T + 0.012);
     // 洗手台（右側）與水龍頭
-    const sx = W / 2 - 0.2, sz = -D / 2 + 0.36;
-    add(new RoundedBoxGeometry(0.36, 0.86, 0.5, 3, 0.03), this.clipped(m.lavWall), sx, 0.43, sz);
-    add(new RoundedBoxGeometry(0.38, 0.03, 0.52, 3, 0.012), m.porcelain, sx, 0.875, sz);
+    const sx = LAV.sink.x(W), sz = LAV.sink.z(D);
+    add(new RoundedBoxGeometry(LAV.sink.w, 0.86, LAV.sink.d, 3, 0.03), this.clipped(m.lavWall), sx, 0.43, sz);
+    add(new RoundedBoxGeometry(LAV.sink.w + 0.02, 0.03, LAV.sink.d + 0.02, 3, 0.012), m.porcelain, sx, 0.875, sz);
     const basin = add(new THREE.SphereGeometry(0.11, 24, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), m.porcelain, sx, 0.89, sz + 0.02); basin.scale.set(1, 0.55, 1.2);
     const tap = add(new THREE.CylinderGeometry(0.012, 0.014, 0.12, 12), m.chrome, sx + 0.12, 0.95, sz + 0.02);
     const spout = add(new THREE.CylinderGeometry(0.009, 0.009, 0.09, 10), m.chrome, sx + 0.08, 1.0, sz + 0.02); spout.rotation.z = Math.PI / 2;
     // 鏡子、紙巾盒、扶手、照明
-    add(new THREE.PlaneGeometry(D * 0.7, 0.5), m.mirror, W / 2 - T - 0.003, 1.35, sz, -Math.PI / 2);
+    // 真實反射的鏡子（只有靠近時才計算反射，節省效能）
+    const mw = Math.min(0.62, D * 0.72);
+    const mir = new Reflector(new THREE.PlaneGeometry(mw, 0.78), { textureWidth: 1024, textureHeight: 1290, color: 0xdde2e7, clipBias: 0.002 });
+    mir.position.set(W / 2 - T - 0.006, 1.5, sz); mir.rotation.y = -Math.PI / 2; mir.visible = false; g.add(mir);
+    add(new THREE.BoxGeometry(0.012, 0.82, mw + 0.04), m.chrome, W / 2 - T - 0.0, 1.5, sz);
+    const baseBR = mir.onBeforeRender.bind(mir);
+    mir.onBeforeRender = (renderer, scene, camera) => {
+      // 反射中要看得到自己（含頭部）
+      const pl = this.player, vis = pl && pl.visible;
+      if (pl) { pl.visible = true; pl.userData.setHead && pl.userData.setHead(true); }
+      baseBR(renderer, scene, camera);
+      if (pl) { pl.visible = vis; pl.userData.setHead && pl.userData.setHead(this.mode !== 'fp'); }
+    };
+    this.mirrors.push({ mesh: mir, f });
     add(new RoundedBoxGeometry(0.04, 0.24, 0.3, 2, 0.01), m.chrome, -W / 2 + T + 0.02, 1.1, tz + 0.3);
     const grab = add(new THREE.CylinderGeometry(0.012, 0.012, 0.35, 10), m.chrome, -W / 2 + T + 0.04, 0.95, tz + 0.05); grab.rotation.x = Math.PI / 2;
     const lightP = add(new THREE.PlaneGeometry(W * 0.6, 0.12), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.8, 1.7, 1.5), toneMapped: false }), 0, h - T - 0.002, 0); lightP.rotation.x = Math.PI / 2;
@@ -933,6 +949,38 @@ export class View3D {
     };
     panel.draw({ pitch: 0, speed: 0, alt: 0 });
     return panel;
+  }
+
+  // ---- 送餐動作：轉向旅客、伸手把餐盤遞到桌板上 ----
+  updateServe(sim, walker, t) {
+    if (!sim) return;
+    if (sim.serveEvents && sim.serveEvents.length) { this.serveQueue.push(...sim.serveEvents); sim.serveEvents.length = 0; }
+    const DUR = 1.5;
+    if (!this.serveAnim && this.serveQueue.length) {
+      const ev = this.serveQueue.shift();
+      const g = this.paxMeshes.get(ev.seat);
+      const st = this.app.aircraft().seats.find((z) => z.id === ev.seat);
+      if (!g || !st) return;
+      const yaw = Math.atan2(st.y - walker.y, st.x - walker.x);
+      const col = { coffee: '#4a2c1a', tea: '#a5652a', oj: '#f2a33a', apple: '#e3c45a', coke: '#3a1d10', water: '#cfe3ef', beer: '#e0b440', wine: '#6e1625' }[ev.drink];
+      const tray = ev.meal === 'none' ? (() => { const c = new THREE.Group(); const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.025, 0.09, 16), new THREE.MeshStandardMaterial({ color: '#f4f4f2' })); const dr = new THREE.Mesh(new THREE.CylinderGeometry(0.027, 0.027, 0.005, 16), new THREE.MeshStandardMaterial({ color: col })); dr.position.y = 0.04; c.add(cup, dr); return c; })() : makeMealTray(col);
+      this.cabin.add(tray);
+      this.serveAnim = { ...ev, t0: t, yaw, tray, g };
+      if (this.mode === 'fp') { this.fp.yaw = yaw; this.fp.pitch = -0.32; }
+    }
+    const a = this.serveAnim;
+    if (!a) { this.player.userData.setReach && this.player.userData.setReach(0); return; }
+    const k = this.serveDebugFreeze != null ? this.serveDebugFreeze : Math.min(1, (t - a.t0) / DUR);
+    const reach = k < 0.65 ? Math.sin((k / 0.65) * Math.PI / 2) : k < 0.85 ? 1 : 1 - (k - 0.85) / 0.15;
+    this.player.userData.setReach(reach);
+    // 餐盤從手上移到旅客桌板
+    const ry = this.player.rotation.y;
+    const hand = P(walker.x, walker.y, 1.05).add(new THREE.Vector3(Math.cos(ry) * 0.42, 0, -Math.sin(ry) * 0.42));
+    const dest = new THREE.Vector3(-0.42, 0.72, 0); a.g.localToWorld(dest); this.cabin.worldToLocal(dest);
+    const m = Math.min(1, k / 0.75), e = m * m * (3 - 2 * m);
+    a.tray.position.lerpVectors(hand, dest, e); a.tray.position.y += Math.sin(e * Math.PI) * 0.08;
+    a.tray.rotation.y = ry;
+    if (k >= 1) { this.cabin.remove(a.tray); this.serveAnim = null; }
   }
 
   // ---- 氧氣面罩（落下後懸掛擺動） ----
@@ -1189,6 +1237,7 @@ export class View3D {
     // 已送餐旅客桌板上的餐點
     if (sim && sim.service) for (const [seat, sv] of Object.entries(sim.service.served)) {
       if (this.trays.has(seat) || sv.meal === 'none') continue;
+      if ((this.serveAnim && this.serveAnim.seat === seat) || this.serveQueue.some((e) => e.seat === seat) || (sim.serveEvents || []).some((e) => e.seat === seat)) continue;
       const g = this.paxMeshes.get(seat); if (!g) continue;
       const col = { coffee: '#4a2c1a', tea: '#a5652a', oj: '#f2a33a', apple: '#e3c45a', coke: '#3a1d10', water: '#cfe3ef', beer: '#e0b440', wine: '#6e1625' }[sv.drink];
       const tr = makeMealTray(col); tr.position.set(-0.42, 0.72, 0); g.add(tr); this.trays.set(seat, tr);
@@ -1229,13 +1278,19 @@ export class View3D {
       const moved = this.lastWalker ? Math.hypot(walker.x - this.lastWalker.x, walker.y - this.lastWalker.y) : 0;
       this.lastWalker = { x: walker.x, y: walker.y };
       moving = moved > 0.0015;
-      this.player.visible = this.mode !== 'fp';
+      // 第一人稱：保留身體（低頭看得到腿、安全帶、手），只隱藏頭部
+      this.player.visible = true;
+      this.player.userData.setHead && this.player.userData.setHead(this.mode !== 'fp');
       this.player.position.copy(P(walker.x, walker.y, walker.seated ? -0.4 : 0));
-      if (moving || walker.seated) {
-        const target = walker.seated ? 0 : (walker.heading ?? 0);
+      if (walker.seated && !this.wasSeated && this.mode === 'fp') { this.fp.yaw = 0; this.fp.pitch = -0.95; }
+      this.wasSeated = walker.seated;
+      const serving = this.serveAnim && this.serveAnim.yaw != null;
+      if (moving || walker.seated || this.mode === 'fp' || serving) {
+        const target = walker.seated ? 0 : serving ? this.serveAnim.yaw : this.mode === 'fp' ? this.fpView.yaw : (walker.heading ?? 0);
         let d = target - this.player.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d));
-        this.player.rotation.y += d * Math.min(1, dt * 10);
+        this.player.rotation.y += this.mode === 'fp' && !walker.seated && !serving ? d : d * Math.min(1, dt * 10);
       }
+      this.updateServe(sim, walker, t);
       this.player.userData.animate(t, moving, walker.seated, dt);
       if (this.player.userData.setHarness) this.player.userData.setHarness(!!(walker.seated && walker.belted));
     } else if (this.player) this.player.visible = false;
@@ -1266,7 +1321,7 @@ export class View3D {
       if (moving && spd > 0.1) this.bob += dt * spd * 5.2;
       const amp = Math.min(1, spd);
       const bobY = Math.sin(this.bob * 2) * 0.016 * amp, bobX = Math.cos(this.bob) * 0.01 * amp;
-      let eyeH = walker.seated ? 1.12 : EYE_H;
+      let eyeH = walker.seated ? 1.33 : EYE_H;
       // 走到行李櫃下方時（例如靠窗走動）自動略為低頭，避免鏡頭穿進行李櫃
       const underBin = (this.binZones || []).some(([a, b]) => walker.x > a - 0.25 && walker.x < b + 0.25);
       if (underBin && !walker.seated) {
@@ -1276,7 +1331,8 @@ export class View3D {
       this.eyeH = this.eyeH == null ? eyeH : this.eyeH + (eyeH - this.eyeH) * Math.min(1, dt * 10);
       eyeH = this.eyeH;
       const right = new THREE.Vector3(Math.sin(this.fpView.yaw), 0, Math.cos(this.fpView.yaw));
-      this.eye.position.copy(P(walker.x, walker.y, eyeH + bobY)).addScaledVector(right, bobX);
+      const ry = this.player.rotation.y, fwd = new THREE.Vector3(Math.cos(ry), 0, -Math.sin(ry));
+      this.eye.position.copy(P(walker.x, walker.y, eyeH + bobY)).addScaledVector(right, bobX).addScaledVector(fwd, walker.seated ? 0.1 : 0.07);
       this.eye.rotation.set(0, 0, 0, 'YXZ');
       this.eye.rotation.y = this.fpView.yaw - Math.PI / 2;
       this.eye.rotation.x = this.fpView.pitch;
@@ -1294,6 +1350,10 @@ export class View3D {
     }
     this.camera.updateProjectionMatrix();
     this.applyEnvIntensity();
+    (this.mirrors || []).forEach((mr) => {
+      const wp = new THREE.Vector3(); mr.mesh.getWorldPosition(wp);
+      mr.mesh.visible = this.mode === 'fp' && this.camera.position.distanceTo(wp) < 2.6 && !!(sim && (sim.doorOpen[mr.f.id] || sim.inLav(mr.f)));
+    });
 
     if (this.quality === 'low') this.renderer.render(this.scene, this.camera);
     else this.composer.render(dt);

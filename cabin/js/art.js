@@ -527,12 +527,12 @@ export function makeCrew(u) {
   }
   // 組員座椅的四點式安全帶（坐下並繫好時顯示）
   const harness = new THREE.Group();
-  const beltM = mat('#3d424b', { roughness: 0.85 }), buckM = mat('#d5d9de', { metalness: 0.9, roughness: 0.2 });
+  const beltM = mat('#9aa0aa', { roughness: 0.8 }), buckM = mat('#d5d9de', { metalness: 0.9, roughness: 0.2 });
   for (const s2 of [-1, 1]) {
-    const sh = new THREE.Mesh(new RoundedBoxGeometry(0.012, 0.42, 0.045, 1, 0.004), beltM); sh.position.set(0.16, 1.28, s2 * 0.075); sh.rotation.x = s2 * 0.18; harness.add(sh);
+    const sh = new THREE.Mesh(new RoundedBoxGeometry(0.014, 0.46, 0.055, 1, 0.004), beltM); sh.position.set(0.172, 1.26, s2 * 0.075); sh.rotation.x = s2 * 0.18; harness.add(sh);
   }
-  const lap = new THREE.Mesh(new RoundedBoxGeometry(0.05, 0.016, 0.4, 1, 0.006), beltM); lap.position.set(0.12, 0.98, 0); harness.add(lap);
-  const rot = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.015, 20), buckM); rot.rotation.z = Math.PI / 2; rot.position.set(0.17, 1.04, 0); harness.add(rot);
+  const lap = new THREE.Mesh(new RoundedBoxGeometry(0.06, 0.02, 0.42, 1, 0.006), beltM); lap.position.set(0.15, 0.99, 0); harness.add(lap);
+  const rot = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.02, 24), buckM); rot.rotation.z = Math.PI / 2; rot.position.set(0.19, 1.02, 0); harness.add(rot);
   harness.visible = false; g.add(harness);
   g.userData.setHarness = (on) => { harness.visible = on; };
   if (u.pilot) {
@@ -546,12 +546,18 @@ export function makeCrew(u) {
     const mic = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.12, 6), mat('#1e2126')); mic.rotation.z = 1.2; mic.position.set(0.06, 1.69, -0.085); g.add(mic);
   }
   g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-  let blend = 0;
+  // 頭部相關零件（第一人稱時隱藏，避免鏡頭看到頭部內側）
+  g.children.forEach((o) => { if (o.position.y > 1.56) o.userData.headPart = true; });
+  g.userData.setHead = (v) => g.children.forEach((o) => { if (o.userData.headPart) o.visible = v; });
+  let blend = 0, reach = 0;
+  g.userData.setReach = (k) => { reach = k; };
   g.userData.animate = (t, moving, seated, dt = 0.016) => {
     blend += ((moving ? 1 : 0) - blend) * Math.min(1, dt * 8);
     const sw = Math.sin(t * 8.5) * 0.5 * blend;
     legs[0].rotation.z = seated ? 1.45 : sw; legs[1].rotation.z = seated ? 1.45 : -sw;
-    arms[0].rotation.z = seated ? 0.45 : -sw * 0.7; arms[1].rotation.z = seated ? 0.45 : sw * 0.7;
+    arms[0].rotation.z = seated ? 0.45 : reach > 0 ? 1.15 * reach : -sw * 0.7;
+    arms[1].rotation.z = seated ? 0.45 : reach > 0 ? 1.35 * reach : sw * 0.7;
+    arms[0].rotation.x = -0.07 + (reach > 0 ? 0.25 * reach : 0); arms[1].rotation.x = 0.07 - (reach > 0 ? 0.25 * reach : 0);
     head.position.y = 1.725 + (seated ? 0 : Math.abs(Math.cos(t * 8.5)) * 0.012 * blend);
   };
   return g;

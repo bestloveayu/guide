@@ -202,12 +202,43 @@ export function roomLayout(f, ac) {
   };
 }
 
+// ---- 洗手間：與 3D 共用的局部座標（x 沿門寬、z 朝門外） ----
+export const LAV = { T: 0.035, toilet: { x: (W) => -W / 2 + 0.26, z: (D) => -D / 2 + 0.24, w: 0.34, d: 0.36, colD: 0.3 }, sink: { x: (W) => W / 2 - 0.2, z: (D) => -D / 2 + 0.3, w: 0.36, d: 0.42, colD: 0.32 } };
+export function lavFrame(f, ac) {
+  const side = Math.abs(f.y) > 0.3 && f.d < ac.width * 0.8;
+  const face = side ? { x: 0, y: f.y < 0 ? 1 : -1 } : { x: f.x < ac.length / 2 ? 1 : -1, y: 0 };
+  const tan = { x: -face.y, y: face.x };
+  const W = side ? f.w : f.d, D = side ? f.d : f.w;
+  const toSim = (lx, lz) => ({ x: f.x + face.x * lz + tan.x * lx, y: f.y + face.y * lz + tan.y * lx });
+  const rect = (lx0, lx1, lz0, lz1) => { const a = toSim(lx0, lz0), b = toSim(lx1, lz1); return { x0: Math.min(a.x, b.x), x1: Math.max(a.x, b.x), y0: Math.min(a.y, b.y), y1: Math.max(a.y, b.y) }; };
+  return { face, tan, W, D, toSim, rect, dw: W * 0.86 };
+}
+export function lavLayout(f, ac) {
+  const fr = lavFrame(f, ac), { W, D, dw, rect, toSim } = fr, T = LAV.T;
+  const tl = LAV.toilet, sk = LAV.sink;
+  return {
+    ...fr,
+    walls: [rect(-W / 2, W / 2, -D / 2, -D / 2 + T), rect(-W / 2, -W / 2 + T, -D / 2, D / 2), rect(W / 2 - T, W / 2, -D / 2, D / 2),
+      rect(-W / 2, -dw / 2, D / 2 - T, D / 2), rect(dw / 2, W / 2, D / 2 - T, D / 2)],
+    door: { rect: rect(-dw / 2, dw / 2, D / 2 - T, D / 2), ...toSim(0, D / 2 + 0.45) },
+    furniture: [rect(tl.x(W) - tl.w / 2, tl.x(W) + tl.w / 2, -D / 2, -D / 2 + tl.colD + 0.03), rect(sk.x(W) - sk.w / 2, sk.x(W) + sk.w / 2, -D / 2, -D / 2 + sk.colD)],
+    inside: toSim(-0.04, D / 2 - T - 0.2),
+    mirror: toSim(W / 2 - T - 0.003, sk.z(D)),
+  };
+}
+
 // doorOpen: { [fixtureId]: true } 表示該房門開啟（可通行）
 function obstacleRects(ac, doorOpen = {}) {
   const rects = [];
   activeSeats(ac).forEach((s) => rects.push({ x0: s.x - s.d / 2, x1: s.x + s.d / 2, y0: s.y - s.w / 2, y1: s.y + s.w / 2 }));
   ac.fixtures.forEach((f) => {
     if (f.type === 'door') return;
+    if (f.type === 'lav') {
+      const r = lavLayout(f, ac);
+      rects.push(...r.walls, ...r.furniture);
+      if (!doorOpen[f.id]) rects.push(r.door.rect);
+      return;
+    }
     if (f.type === 'cockpit' || f.type === 'crewrest') {
       const r = roomLayout(f, ac);
       rects.push(...r.walls, ...r.furniture);

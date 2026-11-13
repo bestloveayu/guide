@@ -761,15 +761,24 @@ class App {
       const send = h('button', { class: 'primary', onclick: () => {
         if (!meal || !drink) { this.toast('系統', '請先選擇餐點與飲料。', 'warn'); return; }
         const r = sim.servePassenger(seat, meal, drink, apo.checked);
-        mealBtns.remove(); drinkBtns.remove(); send.remove(); apoRow.remove();
+        mealBtns.remove(); drinkBtns.remove(); send.remove(); apoRow.remove(); if (pauseBtn) pauseBtn.remove();
+        // 讓出畫面播放遞餐動作
+        const md = $('#modal'); md.style.visibility = 'hidden';
+        setTimeout(() => { md.style.visibility = ''; }, 1650);
         result.append(h('div', { class: 'speaker' }, h('div', { class: 'ava' }, t.icon), h('div', { class: 'bubble' }, h('b', {}, `${rq.name}（${seat}）${r.ok ? ' ✔' : ' ✘'}`), r.reply)),
           h('div', { class: 'btns', style: 'justify-content:flex-end' }, h('button', { class: 'primary', onclick: next }, queue.length ? `下一位（${queue[0]}）` : '完成這一排')));
       } }, '遞給旅客');
       const apoRow = h('label', { style: 'color:var(--text);margin-top:8px' }, apo, ' 先向旅客致歉並說明（想要的餐點已送完時）');
+      const pauseBtn = rq.bad ? h('button', { onclick: () => {
+        sim.pauseServiceAt(seat);
+        this.closeModal(); sim.cancelModal();
+        this.toast('系統', '已暫停服務。狀況解除後再繼續；亂流或下降時請把餐車推回廚房固定。', 'info');
+      } }, '先暫停服務，請旅客稍候') : null;
+      const warn = rq.bad ? h('div', { class: 'card', style: 'border-color:var(--warn);color:#ffd59a;margin:6px 0' }, `⚠ 注意：目前是${rq.bad.what}，旅客也察覺到了。`) : null;
       body.append(
         h('div', { class: 'speaker' }, h('div', { class: 'ava' }, t.icon), h('div', { class: 'bubble' }, h('b', {}, `${rq.name}（${seat}）${rq.note ? '・' + rq.note : ''}`), rq.text)),
-        h('label', {}, '餐點'), mealBtns, h('label', {}, '飲料'), drinkBtns, apoRow, result,
-        h('div', { class: 'btns', style: 'justify-content:flex-end' }, send, h('button', { onclick: () => { this.closeModal(); sim.cancelModal(); } }, '暫停服務')));
+        warn, h('label', {}, '餐點'), mealBtns, h('label', {}, '飲料'), drinkBtns, apoRow, result,
+        h('div', { class: 'btns', style: 'justify-content:flex-end' }, pauseBtn, send, h('button', { onclick: () => { this.closeModal(); sim.cancelModal(); } }, '離開')));
     };
     this.openModal(h('div', {},
       h('h2', {}, `🍽 第 ${info.row} 排　餐飲服務`),

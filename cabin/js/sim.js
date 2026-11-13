@@ -1,6 +1,6 @@
 // 飛行模擬引擎：階段時間軸、任務佇列、移動、評分、組員分派
 import { PHASES, RANKS, rankOf, DEFAULT_CREW, ANNOUNCEMENTS, PRIORITY, PILOTS, MEALS, DRINKS } from './data.js';
-import { buildGrid, findPath, approachPoint, findSeat, findFixture, rowsOf, walkable, slideMove, roomLayout, binDoors, collides } from './layout.js';
+import { buildGrid, findPath, approachPoint, findSeat, findFixture, rowsOf, walkable, slideMove, roomLayout, binDoors, collides, lavLayout } from './layout.js';
 
 const WALK_SPEED = 1.7; // m/s
 const lerp = (a, b, t) => a + (b - a) * Math.max(0, Math.min(1, t));
@@ -287,10 +287,16 @@ export class Flight {
     for (const f of this.ac.fixtures) {
       const d = this.fixtureDist(f);
       if (f.type === 'jumpseat' && d < 0.95) acts.push({ id: 'sit:' + f.id, label: `坐上組員座椅（${f.label || '組員座'}）`, run: () => this.sitAt(f) });
-      if (f.type === 'lav' && d < 1.15) {
-        const open = this.doorOpen[f.id];
-        acts.push({ id: 'lav:' + f.id, label: open ? '關上洗手間門' : '打開洗手間門', run: () => this.toggleDoor(f) });
-        if (open) acts.push({ id: 'lavchk:' + f.id, label: '檢查洗手間（煙霧偵測器、垃圾桶、備品）', run: () => this.checkLav(f) });
+      if (f.type === 'lav') {
+        const lr = lavLayout(f, this.ac);
+        const inside = this.inLav(f);
+        if (inside || Math.hypot(pl.x - lr.door.x, pl.y - lr.door.y) < 0.95) {
+          const open = this.doorOpen[f.id];
+          acts.push({ id: 'lav:' + f.id, label: open ? '關上洗手間門' : '打開洗手間門', run: () => this.toggleDoor(f) });
+          if (open && !inside) acts.push({ id: 'lavin:' + f.id, label: '走進洗手間', run: () => this.walkTo(lr.inside) });
+          if (inside) acts.push({ id: 'lavchk:' + f.id, label: '檢查洗手間（煙霧偵測器、垃圾桶、備品）', run: () => this.checkLav(f) });
+          if (inside && open) acts.push({ id: 'lavout:' + f.id, label: '走出洗手間', run: () => this.walkTo({ x: lr.door.x, y: lr.door.y }) });
+        }
       }
       if (f.type === 'crewrest') {
         const r = roomLayout(f, this.ac);
@@ -327,6 +333,8 @@ export class Flight {
     return acts.slice(0, 6);
   }
 
+  inLav(f) { const r = lavLayout(f, this.ac).rect(-0.5, 0.5, -0.5, 0.5); const b = { x0: f.x - f.w / 2, x1: f.x + f.w / 2, y0: f.y - f.d / 2, y1: f.y + f.d / 2 }; return this.player.x > b.x0 && this.player.x < b.x1 && this.player.y > b.y0 && this.player.y < b.y1; }
+  currentLav() { return this.ac.fixtures.find((f) => f.type === 'lav' && this.inLav(f)); }
   insideRoom(f) {
     const r = roomLayout(f, this.ac), pl = this.player;
     if (f.type === 'cockpit') return pl.x < f.x + f.w / 2;
@@ -358,10 +366,11 @@ export class Flight {
     const open = !this.doorOpen[f.id];
     if (f.type === 'lav' && open && this.critical()) this.violation(`${this.phase.name}期間在客艙走動並開啟洗手間`, 'lav');
     this.doorOpen[f.id] = open;
-    if (f.type !== 'lav') {
-      // 關門時若有人站在門口，先把他移出門的位置
-      this.rebuildGrid();
-      if (!open && !walkable(this.grid, this.player.x, this.player.y)) { const p = approachPoint(this.ac, this.grid, this.player); this.player.x = p.x; this.player.y = p.y; }
+    this.rebuildGrid();
+    // 關門時若站在門板位置，往門外或門內讓開
+    if (!open && collides(this.grid, this.player.x, this.player.y)) {
+      if (f.type === 'lav') { const lr = lavLayout(f, this.ac); const toIn = Math.hypot(this.player.x - lr.inside.x, this.player.y - lr.inside.y) < Math.hypot(this.player.x - lr.door.x, this.player.y - lr.door.y); Object.assign(this.player, toIn ? lr.inside : { x: lr.door.x, y: lr.door.y }); }
+      else { const p = approachPoint(this.ac, this.grid, this.player); this.player.x = p.x; this.player.y = p.y; }
     }
   }
   checkLav(f) {
@@ -466,7 +475,7 @@ export class Flight {
     let target = null;
     const b = this.binsInfo.doors.find((d) => d.id === id);
     if (b) target = { x: b.x, y: b.side * 0.15 };
-    if (f) target = (f.type === 'cockpit' || f.type === 'crewrest') ? (() => { const r = roomLayout(f, this.ac); return { x: r.door.x, y: r.door.y }; })() : approachPoint(this.ac, this.grid, f);
+    if (f) target = f.type === 'lav' ? (() => { const r = lavLayout(f, this.ac); return { x: r.door.x, y: r.door.y }; })() : (f.type === 'cockpit' || f.type === 'crewrest') ? (() => { const r = roomLayout(f, this.ac); return { x: r.door.x, y: r.door.y }; })() : approachPoint(this.ac, this.grid, f);
     if (target) { this.walkTo(target); this.pendingProp = id; }
   }
 
@@ -593,6 +602,22 @@ export class Flight {
     this.modalOpen = true;
     this.hooks.onService && this.hooks.onService({ row: row.row, seats: list.map((s) => s.id) });
   }
+  // 送餐時機是否恰當
+  serviceTiming() {
+    const id = this.phase.id;
+    if (this.env.turbulence > 0) return { key: 'turb', what: '亂流中', pax: '飛機晃成這樣你還在送餐？湯灑出來怎麼辦！', scold: '亂流中還在送餐？！熱湯、熱飲會燙傷旅客，立刻停止服務、把餐車收回去固定！' };
+    if (['descent', 'landing'].includes(id)) return { key: 'desc', what: '下降階段', pax: '不是快降落了嗎？現在發餐我也來不及吃啊。', scold: '都已經開始下降了還在發餐！要收餐盤、做落地前檢查了，快把餐車推回去！' };
+    if (['pushback', 'taxi', 'takeoff'].includes(id)) return { key: 'ground', what: `${this.phase.name}期間`, pax: '飛機還在動耶，現在可以吃東西嗎？', scold: `${this.phase.name}期間怎麼可以送餐？組員應該要就座或做安全檢查！` };
+    if (this.env.seatbelt && id !== 'boarding' && id !== 'deplane') return { key: 'belt', what: '安全帶燈亮著時', pax: '安全帶燈還亮著，現在吃東西沒關係嗎？', scold: '安全帶燈還沒熄就開始服務，要等機長通知可以服務才行！' };
+    return null;
+  }
+  pauseServiceAt(seat) {
+    const bad = this.serviceTiming();
+    const st = this.pax[seat]; if (st) st.patience = Math.max(0, st.patience - 3);
+    this.say(`旅客（${seat}）`, '好的，那我等一下。', 'info');
+    if (bad) this.say(this.judgeName('senior'), '判斷正確，先暫停服務，等狀況解除再繼續。', 'good');
+    return bad;
+  }
   serviceRequest(seat) {
     const pr = this.service.prefs[seat];
     const p = this.sc.passengers.find((x) => x.seat === seat) || {};
@@ -604,7 +629,9 @@ export class Flight {
     else if (pr.meal === 'kids') text = `（家長）小朋友有預訂兒童餐，飲料要${dn}。`;
     else if (pr.meal === 'any') text = '吃什麼都好啦！給我一罐啤酒！快點！';
     else text = `請給我${mn}，飲料要${dn}。`;
-    return { seat, name: p.name || '旅客', type: p.type || 'normal', note: p.note || '', text };
+    const bad = this.serviceTiming();
+    if (bad) text = bad.pax + ' ……' + text;
+    return { seat, name: p.name || '旅客', type: p.type || 'normal', note: p.note || '', text, bad };
   }
   servePassenger(seat, meal, drink, apologized) {
     this.modalOpen = true;
@@ -632,8 +659,18 @@ export class Flight {
     else if (drink === pr.drink) dm += 4;
     else { dm -= 4; ok = false; notes.push('飲料好像拿錯了。'); }
     if (d.hot && this.env.turbulence > 0) this.violation('亂流期間提供熱飲', 'hotdrink');
+    const bad = this.serviceTiming();
+    if (bad) {
+      dm -= 6; ok = false;
+      notes.unshift(bad.key === 'turb' ? '（餐盤在桌上滑動）小心一點！' : bad.key === 'desc' ? '要降落了我還吃得完嗎……' : '這時候送餐真的可以嗎？');
+      this.violation(`${bad.what}送餐`, 'servebad' + bad.key);
+      this.say(this.judgeName('senior'), bad.scold, 'bad');
+    }
+    if (!bad && meal !== 'none' && special(meal) && meal !== pr.meal) this.say(this.judgeName('senior'), '特殊餐一定要先核對名單和座位！送錯會引起客訴，甚至過敏問題。', 'bad');
+    if (p.type === 'drunk' && d.alcohol) this.say(this.judgeName('senior'), '他已經喝醉了你還給酒？出事要負責的是我們！', 'bad');
     this.mood[seat] = Math.max(0, Math.min(100, (this.mood[seat] ?? 70) + dm));
     this.service.served[seat] = { meal, drink };
+    (this.serveEvents || (this.serveEvents = [])).push({ seat, meal, drink });
     this.service.total++; if (ok) this.service.correct++;
     const reply = notes.length ? notes.join(' ') : (dm > 0 ? '謝謝你！' : '嗯。');
     this.say(`旅客（${seat}）`, reply, dm > 0 ? 'good' : dm < 0 ? 'bad' : 'info');
