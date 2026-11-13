@@ -405,7 +405,7 @@ export class View2D {
     ctx.fillStyle = shirts[hsh % shirts.length];
     ctx.beginPath(); ctx.ellipse(cx + r2 * 0.35, cy, r2 * 0.75, r2 * 1.35, 0, 0, Math.PI * 2); ctx.fill();
     // 頭（俯視：頭髮）
-    ctx.fillStyle = p.type === 'elder' ? '#d6d3cc' : hairs[(hsh >> 7) % hairs.length];
+    ctx.fillStyle = p.type === 'elder' ? '#d6d3cc' : hairs[(hsh >>> 7) % hairs.length];
     ctx.beginPath(); ctx.arc(cx + r2 * 0.2, cy, r2 * 0.72, 0, Math.PI * 2); ctx.fill();
     const mood = sim ? sim.mood[s.id] ?? p.mood : p.mood;
     if (sim && mood < 70) {

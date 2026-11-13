@@ -1,6 +1,6 @@
 // 主程式：狀態、介面面板、模式切換、模擬流程
 import { PHASES, RANKS, rankOf, PRIORITY, PAX_TYPES, FIXTURE_TYPES, SEAT_CLASS, AIRLINES, AIRCRAFT_SPECS, ANNOUNCEMENTS, phaseName, defaultScenario } from './data.js';
-import { buildTemplate, buildFromSpec, findSeat, rowsOf, removeRows, insertRowAfter, generateInRect, newId, buildGrid, walkable, approachPoint, findFixture } from './layout.js';
+import { buildTemplate, buildFromSpec, findSeat, rowsOf, removeRows, insertRowAfter, generateInRect, newId, buildGrid, walkable, approachPoint, findFixture, slideMove } from './layout.js';
 import { load, save, download, readFile, resetAll } from './store.js';
 import { View2D } from './view2d.js';
 import { View3D } from './view3d.js';
@@ -66,6 +66,11 @@ class App {
   }
 
   resize() { this.v2.resize(); this.v3.resize(); }
+
+  onQualityAuto(q) {
+    this.state.settings.quality = q; save(this.state);
+    this.toast('系統', '畫面較不流暢，已自動改為中畫質（可在「設定」調整）。', 'warn');
+  }
 
   // ---- 上方列 ----
   bindTop() {
@@ -143,10 +148,8 @@ class App {
     } else if (this.walker && this.view === 'fp') {
       const mv = this.v3.fpMove(dt);
       if (mv) {
-        const w = this.walker, r = 0.18;
-        const ok = (x, y) => walkable(w.grid, x + r, y) && walkable(w.grid, x - r, y) && walkable(w.grid, x, y + r) && walkable(w.grid, x, y - r);
-        if (ok(w.x + mv.dx, w.y)) w.x += mv.dx;
-        if (ok(w.x, w.y + mv.dy)) w.y += mv.dy;
+        slideMove(this.walker.grid, this.walker, mv.dx, mv.dy);
+        this.walker.heading = Math.atan2(mv.dy, mv.dx);
       }
     }
     const walker = sim ? sim.player : (this.view === 'fp' || this.tab === 'crew') ? this.walker : null;
@@ -569,7 +572,11 @@ class App {
   panelSettings() {
     const s = this.state.settings;
     const wrap = h('div');
-    wrap.append(h('h3', {}, '廣播評分'),
+    wrap.append(h('h3', {}, '畫面品質'),
+      field('3D 畫質', h('select', { id: 'qualitySel', onchange: (e) => { s.quality = e.target.value; this.v3.setQuality(s.quality); this.changed(); } },
+        [['high', '高（環境光遮蔽、光暈、柔和陰影）'], ['medium', '中（光暈、陰影）'], ['low', '低（適合較舊的電腦）']].map(([v, n]) => h('option', { value: v, selected: (s.quality || 'high') === v }, n)))),
+      h('p', { class: 'muted' }, '高畫質下若畫面持續低於約 24 FPS，會自動改為中畫質。'),
+      h('h3', {}, '廣播評分'),
       h('p', { class: 'muted' }, `語音辨識：${speechSupported ? '✅ 此瀏覽器支援（建議使用 Chrome / Edge）' : '❌ 此瀏覽器不支援，可改用文字輸入'}`),
       field('語音辨識語言', h('select', { onchange: (e) => { s.speechLang = e.target.value; this.changed(); } }, [['zh-TW', '中文（台灣）'], ['en-US', 'English'], ['ja-JP', '日本語']].map(([v, n]) => h('option', { value: v, selected: s.speechLang === v }, n)))),
       field('AI 評分端點（選填）', h('input', { value: s.aiEndpoint, placeholder: '例如 http://127.0.0.1:3012/api/judge-announcement', onchange: (e) => { s.aiEndpoint = e.target.value.trim(); this.changed(); } })),

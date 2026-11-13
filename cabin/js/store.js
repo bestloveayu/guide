@@ -25,7 +25,7 @@ export function defaultState() {
     currentAircraft: aircraft[0].id,
     currentScenario: sc.id,
     profile: defaultProfile(),
-    settings: { aiEndpoint: '', tts: true, speechLang: 'zh-TW' },
+    settings: { aiEndpoint: '', tts: true, speechLang: 'zh-TW', quality: 'high' },
   };
 }
 

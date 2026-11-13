@@ -158,24 +158,41 @@ export function generateInRect(ac, rect, opts) {
   return count;
 }
 
-// ---- 走道網格（A* 尋路與碰撞） ----
-export const CELL = 0.2;
+// ---- 碰撞與走道網格（A* 尋路） ----
+// 碰撞以「圓形角色 vs 座位/設施矩形」直接計算；尋路網格的格子中心與碰撞判定使用同一套規則，
+// 避免格子對齊誤差讓走道變窄、角色卡住。
+export const CELL = 0.1;
+export const BODY_R = 0.16; // 角色碰撞半徑（公尺）
+
+function obstacleRects(ac) {
+  const rects = [];
+  activeSeats(ac).forEach((s) => rects.push({ x0: s.x - s.d / 2, x1: s.x + s.d / 2, y0: s.y - s.w / 2, y1: s.y + s.w / 2 }));
+  ac.fixtures.forEach((f) => { if (f.type !== 'door') rects.push({ x0: f.x - f.w / 2, x1: f.x + f.w / 2, y0: f.y - f.d / 2, y1: f.y + f.d / 2 }); });
+  return rects;
+}
+
+// 圓形 (x, y, r) 是否與任何障礙或機身側牆重疊
+export function collides(grid, x, y, r = BODY_R) {
+  const W = grid.W;
+  if (y - r < -W / 2 + 0.05 || y + r > W / 2 - 0.05 || x - r < 0 || x + r > grid.L) return true;
+  for (const q of grid.rects) {
+    const dx = Math.max(q.x0 - x, 0, x - q.x1), dy = Math.max(q.y0 - y, 0, y - q.y1);
+    if (dx * dx + dy * dy < r * r) return true;
+  }
+  return false;
+}
+
 export function buildGrid(ac) {
   const W = ac.width;
   const nx = Math.ceil(ac.length / CELL) + 1;
-  const ny = Math.ceil(W / CELL);
+  const ny = Math.round(W / CELL) + 1;
   const g = new Uint8Array(nx * ny); // 1 = 阻擋
-  const block = (cx, cy, w, d, pad = 0.04) => {
-    const xa = Math.floor((cx - w / 2 - pad) / CELL), xb = Math.floor((cx + w / 2 + pad) / CELL);
-    const ya = Math.floor((cy - d / 2 - pad + W / 2) / CELL), yb = Math.floor((cy + d / 2 + pad + W / 2) / CELL);
-    for (let i = Math.max(0, xa); i <= Math.min(nx - 1, xb); i++)
-      for (let j = Math.max(0, ya); j <= Math.min(ny - 1, yb); j++) g[j * nx + i] = 1;
-  };
-  for (let j = 0; j < ny; j++) { g[j * nx] = 1; g[j * nx + nx - 1] = 1; }
-  for (let i = 0; i < nx; i++) { g[i] = 1; g[(ny - 1) * nx + i] = 1; }
-  activeSeats(ac).forEach((s) => block(s.x, s.y, s.d + 0.12, s.w));
-  ac.fixtures.forEach((f) => { if (f.type !== 'door') block(f.x, f.y, f.w, f.d); });
-  return { nx, ny, g, W };
+  const grid = { nx, ny, g, W, L: ac.length, rects: obstacleRects(ac) };
+  for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+    const p = fromCell(grid, i, j);
+    if (collides(grid, p.x, p.y, BODY_R + 0.02)) g[j * nx + i] = 1;
+  }
+  return grid;
 }
 export const toCell = (grid, x, y) => [Math.round(x / CELL), Math.round((y + grid.W / 2) / CELL)];
 export const fromCell = (grid, i, j) => ({ x: i * CELL, y: j * CELL - grid.W / 2 });
@@ -186,17 +203,31 @@ export function walkable(grid, x, y) {
 }
 
 function nearestFree(grid, i, j) {
+  i = Math.max(0, Math.min(grid.nx - 1, i)); j = Math.max(0, Math.min(grid.ny - 1, j));
   if (grid.g[j * grid.nx + i] === 0) return [i, j];
-  for (let r = 1; r < 25; r++) {
+  for (let r = 1; r < 60; r++) {
     let best = null, bd = 1e9;
     for (let di = -r; di <= r; di++) for (let dj = -r; dj <= r; dj++) {
+      if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue;
       const a = i + di, b = j + dj;
       if (a < 0 || b < 0 || a >= grid.nx || b >= grid.ny) continue;
-      if (grid.g[b * grid.nx + a] === 0) { const d = Math.abs(di) * 1.5 + Math.abs(dj); if (d < bd) { bd = d; best = [a, b]; } }
+      if (grid.g[b * grid.nx + a] === 0) { const d = Math.hypot(di, dj); if (d < bd) { bd = d; best = [a, b]; } }
     }
     if (best) return best;
   }
   return [i, j];
+}
+
+// 二元堆積（A* 開放列表）
+class Heap {
+  constructor() { this.a = []; }
+  push(n) { const a = this.a; a.push(n); let i = a.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (a[p][0] <= a[i][0]) break; [a[p], a[i]] = [a[i], a[p]]; i = p; } }
+  pop() {
+    const a = this.a, top = a[0], last = a.pop();
+    if (a.length) { a[0] = last; let i = 0; for (;;) { const l = i * 2 + 1, r = l + 1; let m = i; if (l < a.length && a[l][0] < a[m][0]) m = l; if (r < a.length && a[r][0] < a[m][0]) m = r; if (m === i) break; [a[m], a[i]] = [a[i], a[m]]; i = m; } }
+    return top;
+  }
+  get size() { return this.a.length; }
 }
 
 export function findPath(grid, from, to) {
@@ -206,26 +237,22 @@ export function findPath(grid, from, to) {
   const idx = (i, j) => j * nx + i;
   const cost = new Float32Array(nx * ny).fill(Infinity);
   const prev = new Int32Array(nx * ny).fill(-1);
-  const open = [[0, si, sj]];
+  const open = new Heap();
+  open.push([0, si, sj]);
   cost[idx(si, sj)] = 0;
   const dirs = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 1.414], [1, -1, 1.414], [-1, 1, 1.414], [-1, -1, 1.414]];
-  let found = false, iter = 0;
-  while (open.length && iter++ < 60000) {
-    // 小型網格：線性取最小值即可
-    let bi = 0;
-    for (let k = 1; k < open.length; k++) if (open[k][0] < open[bi][0]) bi = k;
-    const [, i, j] = open.splice(bi, 1)[0];
+  let found = false;
+  while (open.size) {
+    const [f, i, j] = open.pop();
     if (i === ti && j === tj) { found = true; break; }
     const c = cost[idx(i, j)];
+    if (f - Math.hypot(ti - i, tj - j) > c + 1e-4) continue; // 過期節點
     for (const [di, dj, w] of dirs) {
       const a = i + di, b = j + dj;
       if (a < 0 || b < 0 || a >= nx || b >= ny || g[idx(a, b)]) continue;
       if (di && dj && (g[idx(i + di, j)] || g[idx(i, j + dj)])) continue;
       const nc = c + w;
-      if (nc < cost[idx(a, b)]) {
-        cost[idx(a, b)] = nc; prev[idx(a, b)] = idx(i, j);
-        open.push([nc + Math.hypot(ti - a, tj - b), a, b]);
-      }
+      if (nc < cost[idx(a, b)]) { cost[idx(a, b)] = nc; prev[idx(a, b)] = idx(i, j); open.push([nc + Math.hypot(ti - a, tj - b), a, b]); }
     }
   }
   if (!found) return [to];
@@ -233,14 +260,48 @@ export function findPath(grid, from, to) {
   let k = idx(ti, tj);
   while (k !== -1) { pts.push(fromCell(grid, k % nx, Math.floor(k / nx))); k = prev[k]; }
   pts.reverse();
-  // 簡化：只保留轉折點
-  const out = [];
-  for (let n = 0; n < pts.length; n++) {
-    if (n === 0 || n === pts.length - 1) { out.push(pts[n]); continue; }
-    const a = pts[n - 1], b = pts[n], c = pts[n + 1];
-    if (Math.abs((b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)) > 1e-6) out.push(b);
+  // 拉直：能直線走到的點就略過中間點
+  const out = [pts[0]];
+  let anchor = 0;
+  for (let n = 2; n < pts.length; n++) {
+    if (!lineClear(grid, pts[anchor], pts[n])) { out.push(pts[n - 1]); anchor = n - 1; }
   }
-  return out;
+  if (pts.length > 1) out.push(pts[pts.length - 1]);
+  return out.length > 1 ? out.slice(1) : out;
+}
+
+function lineClear(grid, a, b) {
+  const d = Math.hypot(b.x - a.x, b.y - a.y);
+  const n = Math.ceil(d / (CELL * 0.5));
+  for (let k = 1; k < n; k++) { const t = k / n; if (!walkable(grid, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)) return false; }
+  return true;
+}
+
+// 第一人稱移動：碰到障礙時沿牆面滑動
+export function slideMove(grid, p, dx, dy, r = BODY_R) {
+  if (!collides(grid, p.x + dx, p.y + dy, r)) { p.x += dx; p.y += dy; return; }
+  const len0 = Math.hypot(dx, dy);
+  if (Math.abs(dx) > len0 * 0.3 && !collides(grid, p.x + dx, p.y, r)) { p.x += dx; return; }
+  if (Math.abs(dy) > len0 * 0.3 && !collides(grid, p.x, p.y + dy, r)) { p.y += dy; return; }
+  for (const s of [0.5, 0.25]) { if (!collides(grid, p.x + dx * s, p.y + dy * s, r)) { p.x += dx * s; p.y += dy * s; return; } }
+  // 正面被擋住：找左右最近、可以繼續前進的通道，往那邊側移（例如雙走道機型各艙等走道位置不同）
+  const len = Math.hypot(dx, dy);
+  if (!len) return;
+  const ux = dx / len, uy = dy / len, px = -uy, py = ux;
+  const ahead = Math.max(len, 0.08);
+  for (let o = 0.04; o <= 0.9; o += 0.04) {
+    for (const sg of [1, -1]) {
+      const lx = p.x + px * o * sg, ly = p.y + py * o * sg;
+      if (collides(grid, lx, ly, r) || collides(grid, lx + ux * ahead, ly + uy * ahead, r)) continue;
+      // 側移途中不可穿過障礙
+      let clear = true;
+      for (let k = 0.04; k < o; k += 0.04) if (collides(grid, p.x + px * k * sg, p.y + py * k * sg, r)) { clear = false; break; }
+      if (!clear) continue;
+      const step = Math.min(o, len);
+      p.x += px * step * sg; p.y += py * step * sg;
+      return;
+    }
+  }
 }
 
 // 走到座位旁：該排最近走道點

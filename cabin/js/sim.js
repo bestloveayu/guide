@@ -1,6 +1,6 @@
 // 飛行模擬引擎：階段時間軸、任務佇列、移動、評分、組員分派
 import { PHASES, RANKS, rankOf, DEFAULT_CREW, ANNOUNCEMENTS, PRIORITY } from './data.js';
-import { buildGrid, findPath, approachPoint, findSeat, findFixture, rowsOf, walkable } from './layout.js';
+import { buildGrid, findPath, approachPoint, findSeat, findFixture, rowsOf, walkable, slideMove } from './layout.js';
 
 const WALK_SPEED = 1.7; // m/s
 const lerp = (a, b, t) => a + (b - a) * Math.max(0, Math.min(1, t));
@@ -97,14 +97,11 @@ export class Flight {
     this.standUp();
     this.player.path = findPath(this.grid, this.player, pt);
   }
-  moveManual(dx, dy) { // 第一人稱移動（公尺）
+  moveManual(dx, dy) { // 第一人稱移動（公尺），碰到座位或牆面時沿表面滑動
     if (dx || dy) this.standUp();
     this.player.path = [];
-    const r = 0.18;
-    const nx = this.player.x + dx, ny = this.player.y + dy;
-    const ok = (x, y) => walkable(this.grid, x + r, y) && walkable(this.grid, x - r, y) && walkable(this.grid, x, y + r) && walkable(this.grid, x, y - r);
-    if (ok(nx, this.player.y)) this.player.x = nx;
-    if (ok(this.player.x, ny)) this.player.y = ny;
+    slideMove(this.grid, this.player, dx, dy);
+    if (dx || dy) this.player.heading = Math.atan2(dy, dx);
   }
   standUp() {
     if (!this.player.seated) return;
