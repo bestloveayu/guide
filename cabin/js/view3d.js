@@ -283,6 +283,7 @@ export class View3D {
     this.cockpitPanel = null;
     this.mirrors = [];
     this.serveAnim = null; this.serveQueue = [];
+    this.cabinDoors = []; this.doorGaps = {};
     this.bagMeshes = new Map(); this.walkers = new Map(); this.callMarks = new Map(); this.spillMeshes = new Map(); this.binBlend = 0;
     const m = materials();
     const L = ac.length, W = ac.width, R = W / 2;
@@ -336,11 +337,30 @@ export class View3D {
     this.glowMats = [glowMat];
     for (const s of [-1, 1]) {
       // 側牆（下方腳踢板 + 弧形內襯板）
-      this.cabin.add(new THREE.Mesh(sweep([[R, 0], [R + 0.015, 0.25]], 0, L, s), kick));
-      this.cabin.add(new THREE.Mesh(sweep(smoothProfile([[R + 0.015, 0.25], [R + 0.05, 0.75], [R + 0.03, 1.15], [R - 0.05, 1.45], [R - 0.17, 1.64]], 8), 0, L, s), wall));
       const ix = R - 0.74; // 行李櫃內緣（離中線距離）
+      // 艙門處牆面斷開，改成垂直的門區（艙門高約 1.95 m）
+      const gaps = ac.fixtures.filter((f) => f.type === 'door' && -Math.sign(f.y) === s).map((f) => [f.x - f.w / 2 - 0.14, f.x + f.w / 2 + 0.14]).sort((a, b) => a[0] - b[0]);
+      const spans = []; let cur = 0; gaps.forEach(([a, b]) => { if (a > cur) spans.push([cur, a]); cur = Math.max(cur, b); }); if (cur < L) spans.push([cur, L]);
+      this.doorGaps = this.doorGaps || {}; this.doorGaps[s] = gaps;
+      const wallProf = smoothProfile([[R + 0.015, 0.25], [R + 0.05, 0.75], [R + 0.03, 1.15], [R - 0.05, 1.45], [R - 0.17, 1.64]], 8);
+      const shProf = smoothProfile([[R - 0.17, 1.64], [R - 0.3, 1.86], [R - 0.48, 2.02], [ix + 0.3, 2.1]], 6);
+      spans.forEach(([a, b]) => {
+        this.cabin.add(new THREE.Mesh(sweep([[R, 0], [R + 0.015, 0.25]], a, b, s), kick));
+        this.cabin.add(new THREE.Mesh(sweep(wallProf, a, b, s), wall));
+        const sh = new THREE.Mesh(sweep(shProf, a, b, s), ceil); sh.userData.ceiling = true; this.cabin.add(sh);
+      });
+      gaps.forEach(([a, b]) => {
+        const hd = new THREE.Mesh(sweep([[R - 0.03, 2.03], [R - 0.3, 2.08], [ix + 0.3, 2.1]], a, b, s), ceil); this.cabin.add(hd);
+        this.cabin.add(new THREE.Mesh(sweep([[R - 0.03, 0], [R - 0.03, 0.06]], a, b, s), kick));
+        // 斷面封板
+        for (const ex of [a, b]) {
+          const pts = [[R - 0.03, 1.25], ...wallProf.filter(([r, h]) => h > 1.3), ...shProf.slice(1), [R - 0.03, 2.1]];
+          const sh = new THREE.Shape(); sh.moveTo(pts[0][0], pts[0][1]); pts.slice(1).forEach(([r, h]) => sh.lineTo(r, h));
+          const cg = new THREE.ShapeGeometry(sh); cg.rotateY(-Math.PI / 2);
+          const cm = new THREE.Mesh(cg, wall); cm.position.x = ex; cm.scale.z = s; this.cabin.add(cm);
+        }
+      });
       // 牆頂到天花板的弧形過渡板（全長；門區、廚房上方沒有行李櫃時可見）
-      const shoulder = new THREE.Mesh(sweep(smoothProfile([[R - 0.17, 1.64], [R - 0.3, 1.86], [R - 0.48, 2.02], [ix + 0.3, 2.1]], 6), 0, L, s), ceil); shoulder.userData.ceiling = true; this.cabin.add(shoulder);
       // 天花板（從照明槽往中央拱起）
       const cl = new THREE.Mesh(sweep(smoothProfile([[ix + 0.3, 2.1], [ix * 0.55, 2.24], [ix * 0.25, 2.29], [0, 2.3]], 6), 0, L, s), ceil); cl.userData.ceiling = true; this.cabin.add(cl);
       // 行李櫃：只裝在座位區上方（艙門、廚房區沒有行李櫃，與真實機艙相同）
@@ -363,23 +383,47 @@ export class View3D {
       const hz = s * (ix + 0.24), hy = 2.08;
       const bagCols = ['#2a2d33', '#5b3b2a', '#30445e', '#6b6f78', '#7a2f35', '#1f3a33'];
       const bagMats = bagCols.map((c) => this.clipped(new THREE.MeshStandardMaterial({ color: c, roughness: 0.6 })));
-      bd.doors.filter((d) => d.side === -s).forEach((d, k) => { // d.side 為模擬座標（左舷負），three 的 z 方向相反
-        const pivot = new THREE.Group(); pivot.position.set(0, hy, hz);
-        const dg = sweep(doorProfile, d.x0 + 0.004, d.x1 - 0.004, s); dg.translate(0, -hy, -hz);
+      // 下翻式行李櫃（pivot bin）：開啟時櫃體前緣往下翻，關閉時要由下往上推
+      bd.doors.filter((d) => d.side === -s && !d.center).forEach((d) => {
+        const hy2 = 2.05, hz2 = s * (R - 0.2);
+        const pivot = new THREE.Group(); pivot.position.set(0, hy2, hz2);
+        const dg = sweep(doorProfile, d.x0 + 0.004, d.x1 - 0.004, s); dg.translate(0, -hy2, -hz2);
         const dm = new THREE.Mesh(dg, bin); dm.userData.propId = d.id;
-        const handle = new THREE.Mesh(new RoundedBoxGeometry(0.22, 0.022, 0.03, 2, 0.01), seamMat); handle.position.set(d.x, 1.7 - hy, s * (ix - 0.014) - hz); handle.userData.propId = d.id;
+        const handle = new THREE.Mesh(new RoundedBoxGeometry(0.22, 0.022, 0.03, 2, 0.01), seamMat); handle.position.set(d.x, 1.7 - hy2, s * (ix - 0.014) - hz2); handle.userData.propId = d.id;
         pivot.add(dm, handle); pivot.userData.ceiling = true;
         this.cabin.add(pivot); this.propMeshes.push(dm, handle);
-        this.pivots.set(d.id, { pivot, axis: 'x', base: 0, dir: s, max: 1.25, cur: 0 });
+        this.pivots.set(d.id, { pivot, axis: 'x', base: 0, dir: this.downSign(new THREE.Vector3(0, 1.72 - hy2, s * ix - hz2)), max: 0.48, cur: 0 });
       });
       const seams = new THREE.InstancedMesh(new THREE.BoxGeometry(0.006, 0.34, 0.012), seamMat, bd.doors.length);
-      bd.doors.forEach((d, k) => seams.setMatrixAt(k, M(d.x0, 1.88, s * (ix - 0.012), s > 0 ? 0.1 : -0.1, 0, 0)));
+      bd.doors.forEach((d, k) => seams.setMatrixAt(k, d.center ? M(0, -20, 0) : M(d.x0, 1.88, s * (ix - 0.012), s > 0 ? 0.1 : -0.1, 0, 0)));
       seams.userData.ceiling = true;
       this.cabin.add(seams);
     }
     if (W > 4.6) {
-      const cb = new THREE.Mesh(new RoundedBoxGeometry(L - 8, 0.44, 1.5, 4, 0.14), bin);
-      cb.position.set(L / 2 + 1, 1.95, 0); cb.userData.ceiling = true; this.cabin.add(cb);
+      // 中央行李櫃：每段有底板、頂板、中隔板與兩端封板，兩側各一排可開的櫃門
+      const binU = this.clipped(m.binUnder);
+      binZones.forEach(([a, b]) => {
+        const len = b - a, cx = (a + b) / 2;
+        const add = (geo, mat, x, y, z) => { const o = new THREE.Mesh(geo, mat); o.position.set(x, y, z); o.userData.ceiling = true; this.cabin.add(o); return o; };
+        add(new RoundedBoxGeometry(len, 0.03, 1.5, 2, 0.01), binU, cx, 1.715, 0);
+        add(new RoundedBoxGeometry(len, 0.03, 1.24, 2, 0.01), bin, cx, 2.17, 0);
+        add(new THREE.BoxGeometry(len, 0.44, 0.02), binU, cx, 1.94, 0);
+        for (const ex of [a, b]) add(new THREE.BoxGeometry(0.02, 0.46, 1.5), binU, ex, 1.94, 0);
+        // 底面的閱讀燈面板（中間座位用）
+        add(new THREE.BoxGeometry(len, 0.012, 1.0), this.clipped(m.shell), cx, 1.698, 0);
+      });
+      const cProfile = smoothProfile([[0.75, 1.73], [0.775, 1.85], [0.765, 1.98], [0.71, 2.1], [0.62, 2.17]], 6);
+      bd.doors.filter((d) => d.center).forEach((d) => {
+        const ts = -d.side; // three.js z 方向
+        const hy2 = 2.17, hz2 = ts * 0.45;
+        const pivot = new THREE.Group(); pivot.position.set(0, hy2, hz2);
+        const dg = sweep(cProfile, d.x0 + 0.004, d.x1 - 0.004, ts); dg.translate(0, -hy2, -hz2);
+        const dm = new THREE.Mesh(dg, bin); dm.userData.propId = d.id;
+        const handle = new THREE.Mesh(new RoundedBoxGeometry(0.22, 0.022, 0.03, 2, 0.01), this.clipped(m.shellDark)); handle.position.set(d.x, 1.76 - hy2, ts * 0.765 - hz2); handle.userData.propId = d.id;
+        pivot.add(dm, handle); pivot.userData.ceiling = true;
+        this.cabin.add(pivot); this.propMeshes.push(dm, handle);
+        this.pivots.set(d.id, { pivot, axis: 'x', base: 0, dir: this.downSign(new THREE.Vector3(0, 1.73 - hy2, ts * 0.75 - hz2)), max: 0.42, cur: 0 });
+      });
     }
 
     // 窗戶：牆面上的凹槽窗框（漸層陰影烘焙在貼圖上）+ 窗景 + 隨機半拉的遮光板
@@ -646,13 +690,32 @@ export class View3D {
         lamp.position.copy(pos).addScaledVector(face, depth / 2 + 0.03); lamp.position.y = 1.62; lamp.rotation.y = lookY; this.cabin.add(lamp);
       }
     } else if (f.type === 'door') {
-      const h = 1.9;
-      const sideZ = Math.sign(pos.z || 1);
-      const frame = new THREE.Mesh(new RoundedBoxGeometry(f.w + 0.2, h + 0.16, 0.08, 3, 0.03), this.clipped(m.shell));
-      frame.position.set(pos.x, (h + 0.16) / 2, sideZ * (R + 0.02)); this.cabin.add(frame);
-      const dm = this.clipped(m.bin); dm.map = facadeTexture('door', f.label, accent); dm.color = new THREE.Color('#ffffff');
-      const door = new THREE.Mesh(new THREE.PlaneGeometry(f.w, h), dm);
-      door.position.set(pos.x, h / 2 + 0.02, sideZ * (R - 0.025)); door.rotation.y = pos.z > 0 ? Math.PI : 0; this.cabin.add(door);
+      const h = 1.95, sideZ = Math.sign(pos.z || 1), zw = sideZ * (R - 0.03);
+      // 門區牆板（開口兩側與上方）
+      const bayM = this.clipped(m.wall);
+      for (const dx of [-1, 1]) { const st = new THREE.Mesh(new THREE.BoxGeometry(0.14, 2.05, 0.04), bayM); st.position.set(pos.x + dx * (f.w / 2 + 0.07), 1.025, zw + sideZ * 0.02); this.cabin.add(st); }
+      const top = new THREE.Mesh(new THREE.BoxGeometry(f.w + 0.28, 0.1, 0.04), bayM); top.position.set(pos.x, h + 0.05, zw + sideZ * 0.02); this.cabin.add(top);
+      // 門框
+      const fm = this.clipped(m.shell);
+      for (const dx of [-1, 1]) { const fr = new THREE.Mesh(new RoundedBoxGeometry(0.05, h, 0.06, 2, 0.015), fm); fr.position.set(pos.x + dx * (f.w / 2 + 0.02), h / 2, zw); this.cabin.add(fr); }
+      const ft = new THREE.Mesh(new RoundedBoxGeometry(f.w + 0.09, 0.05, 0.06, 2, 0.015), fm); ft.position.set(pos.x, h + 0.01, zw); this.cabin.add(ft);
+      const sill = new THREE.Mesh(new THREE.BoxGeometry(f.w + 0.09, 0.02, 0.2), this.clipped(m.steel)); sill.position.set(pos.x, 0.01, zw); this.cabin.add(sill);
+      // 門外：空橋（開門時看得到）
+      const jb = canvasTex(256, 512, (g) => {
+        const gr = g.createLinearGradient(0, 0, 0, 512); gr.addColorStop(0, '#c9ced6'); gr.addColorStop(1, '#8f949c'); g.fillStyle = gr; g.fillRect(0, 0, 256, 512);
+        g.fillStyle = '#fbf6e8'; g.beginPath(); g.moveTo(70, 140); g.lineTo(186, 140); g.lineTo(186, 330); g.lineTo(70, 330); g.fill();
+        g.strokeStyle = '#7d838c'; g.lineWidth = 3; [[0, 0, 70, 140], [256, 0, 186, 140], [0, 512, 70, 330], [256, 512, 186, 330]].forEach(([a, b2, c, d]) => { g.beginPath(); g.moveTo(a, b2); g.lineTo(c, d); g.stroke(); });
+        g.fillStyle = '#5b616b'; g.beginPath(); g.moveTo(0, 512); g.lineTo(70, 330); g.lineTo(186, 330); g.lineTo(256, 512); g.fill();
+        g.fillStyle = 'rgba(255,255,255,0.6)'; for (let i = 0; i < 4; i++) g.fillRect(20 + i * 6, 40 + i * 25, 6, 60 - i * 10);
+      });
+      const portal = new THREE.Mesh(new THREE.PlaneGeometry(f.w + 0.1, h + 0.05), new THREE.MeshBasicMaterial({ map: jb, toneMapped: false, color: new THREE.Color(1.15, 1.15, 1.15) }));
+      portal.position.set(pos.x, h / 2, sideZ * (R + 0.08)); portal.rotation.y = sideZ > 0 ? Math.PI : 0; portal.visible = false; this.cabin.add(portal);
+      // 艙門板（往外推開後沿機身方向滑開）
+      const dm = this.clipped(m.bin); dm.map = facadeTexture('door', f.label, accent); dm.color = new THREE.Color('#ffffff'); dm.side = THREE.DoubleSide;
+      const door = new THREE.Mesh(new RoundedBoxGeometry(f.w, h - 0.02, 0.05, 2, 0.02), dm);
+      door.position.set(pos.x, h / 2, zw + sideZ * 0.005); this.cabin.add(door);
+      const handleD = new THREE.Mesh(new RoundedBoxGeometry(0.28, 0.05, 0.05, 2, 0.02), this.clipped(m.shellDark)); handleD.position.set(0.1, 0.15, -sideZ * 0.04); door.add(handleD);
+      this.cabinDoors.push({ f, door, portal, sideZ, base: door.position.clone(), cur: 0, boarding: /^L1/.test(f.label || '') });
       const exitTex = canvasTex(256, 96, (g) => { g.fillStyle = '#0d6b3a'; g.fillRect(0, 0, 256, 96); g.fillStyle = '#ffffff'; g.font = '700 58px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('EXIT', 128, 50); });
       const exit = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.11), new THREE.MeshBasicMaterial({ map: exitTex, toneMapped: false, color: new THREE.Color(1.6, 1.6, 1.6) }));
       exit.position.set(pos.x, 2.08, sideZ * (R - 0.2)); exit.rotation.y = sideZ > 0 ? Math.PI : 0; exit.userData.ceiling = true; this.cabin.add(exit);
@@ -944,6 +1007,9 @@ export class View3D {
     return panel;
   }
 
+  // 旋轉方向：讓櫃門前緣往下（開）
+  downSign(v) { const a = v.clone().applyAxisAngle(new THREE.Vector3(1, 0, 0), 0.2); return a.y < v.y ? 1 : -1; }
+
   // =================== 動態場景：行李、登機旅客、服務鈴、掉落物、行李櫃視角 ===================
   updateDynamic(sim, walker, t, dt) {
     const ac = this.app.aircraft();
@@ -957,7 +1023,11 @@ export class View3D {
         bags.forEach((bag, i) => {
           const key = doorId + '#' + i;
           let mesh = this.bagMeshes.get(key);
-          const pose = bagPose(d, i, bag.tidy, ac.width);
+          let pose = bagPose(d, i, bag.tidy, ac.width);
+          if (!bag.tidy && bag.push != null) {
+            const tp0 = bagPose(d, i, true, ac.width), e = bag.push;
+            pose = { x: pose.x + (tp0.x - pose.x) * e, y: pose.y + (tp0.y - pose.y) * e, h: pose.h + (tp0.h - pose.h) * e, yaw: 0.5 * bag.skew * (i % 2 ? 1 : -1) * (i % 2 ? 1 : -1), roll: pose.roll * (1 - e) };
+          }
           if (!mesh) {
             mesh = makeBinBag(bag.col, bag.seed || i);
             mesh.traverse((o) => { if (o.isMesh) { o.userData.propId = `bag|${doorId}|${i}`; this.propMeshes.push(o); } });
@@ -965,7 +1035,8 @@ export class View3D {
             mesh.position.copy(st);
             this.cabin.add(mesh); this.bagMeshes.set(key, mesh);
           }
-          mesh.visible = fp || !!sim.binView;
+          const pv = this.pivots.get(doorId);
+          mesh.visible = (fp || !!sim.binView) && (!!sim.binOpen[doorId] || (pv && pv.cur > 0.04));
           const tp = P(pose.x, pose.y, pose.h);
           mesh.position.lerp(tp, k);
           mesh.rotation.y += (pose.yaw - mesh.rotation.y) * k;
@@ -1077,8 +1148,8 @@ export class View3D {
     if (!d) return;
     this.lastBinDoor = d;
     const R = this.app.aircraft().width / 2, inner = R - 0.74;
-    const pos = P(d.x - 0.15, d.side * Math.max(-0.1, inner - 0.6), 1.62);
-    const look = P(d.x, d.side * (R - 0.5), 1.82);
+    const pos = P(d.x - 0.15, d.edgeY + d.face * 0.65, 1.6);
+    const look = P(d.x, d.bagY, d.center ? 1.88 : 1.8);
     this.cabin.updateMatrixWorld(true);
     const wp = pos.clone().applyMatrix4(this.cabin.matrixWorld), wl = look.clone().applyMatrix4(this.cabin.matrixWorld);
     const tmp = this.tmpCam || (this.tmpCam = new THREE.PerspectiveCamera()); tmp.position.copy(wp); tmp.lookAt(wl);
@@ -1180,11 +1251,26 @@ export class View3D {
     let drag = null;
     el.addEventListener('contextmenu', (e) => e.preventDefault());
     el.addEventListener('pointerdown', (e) => {
+      const sim = this.app.sim;
+      if (sim && sim.binView) {
+        const h = this.hitTest(e, false);
+        if (h && h.type === 'prop' && h.id.startsWith('bag|')) {
+          const [, doorId, idx] = h.id.split('|');
+          if (doorId === sim.binView) { this.bagDrag = { doorId, idx: +idx, hand: e.button === 2 ? 'R' : 'L', x: e.clientX, y: e.clientY }; el.style.cursor = 'grabbing'; return; }
+        }
+      }
       drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, btn: e.button, moved: false };
       if (this.mode === 'fp') el.style.cursor = 'grabbing';
     });
     let hoverT = 0;
     window.addEventListener('pointermove', (e) => {
+      if (this.bagDrag) {
+        const bd = this.bagDrag, sim = this.app.sim;
+        const dx = e.clientX - bd.x, dy = e.clientY - bd.y; bd.x = e.clientX; bd.y = e.clientY;
+        if (sim) sim.handleBag(bd.doorId, bd.idx, -dy * 0.0045, (bd.hand === 'L' ? 1 : -1) * dx * 0.006 * (bd.idx % 2 ? -1 : 1));
+        bd.active = performance.now();
+        return;
+      }
       if (!drag) {
         // 滑鼠移到可互動的人物上時顯示手指游標
         if (e.target === el && performance.now() - hoverT > 90) {
@@ -1215,6 +1301,7 @@ export class View3D {
       }
     });
     window.addEventListener('pointerup', (e) => {
+      if (this.bagDrag) { this.bagDrag = null; el.style.cursor = 'grab'; return; }
       if (drag && !drag.moved && drag.btn === 0 && e.target === el) {
         const h = this.hitTest(e, true);
         if (h) this.app.onPick(h);
@@ -1362,6 +1449,14 @@ export class View3D {
     this.updateDynamic(sim, walker, t, dt);
     const showBins = this.mode === 'fp' || !!(sim && sim.binView);
     if (this.showBinsState !== showBins) { this.showBinsState = showBins; this.cabin.traverse((o) => { if (o.userData.ceiling) o.visible = showBins; }); this.clipMats.forEach((mm) => { mm.clippingPlanes = showBins ? [] : [this.clipWorld]; mm.needsUpdate = true; }); }
+    // 登機門：登機與下機時開啟（L1）
+    (this.cabinDoors || []).forEach((cd) => {
+      const open = sim ? (sim.env.doorsOpen && (cd.boarding || this.cabinDoors.length === 1)) : cd.boarding;
+      cd.cur += ((open ? 1 : 0) - cd.cur) * Math.min(1, dt * 1.5);
+      const out = Math.min(1, cd.cur * 2), slide = Math.max(0, cd.cur * 2 - 1);
+      cd.door.position.copy(cd.base).add(new THREE.Vector3(slide * (cd.f.w + 0.15), 0, cd.sideZ * out * 0.12));
+      cd.portal.visible = cd.cur > 0.02;
+    });
     // 可開關物件動畫（行李櫃、洗手間門、休息室門、駕駛艙門）
     if (this.pivots) this.pivots.forEach((pv, id) => {
       const target = sim ? ((sim.binOpen && sim.binOpen[id]) || (sim.doorOpen && sim.doorOpen[id]) ? 1 : 0) : 0;
@@ -1509,7 +1604,19 @@ export class View3D {
           this.scene.add(this.binHands);
         }
         const r = this.tidyT && t - this.tidyT < 0.8 ? Math.sin(((t - this.tidyT) / 0.8) * Math.PI) : 0;
-        this.binHands.visible = r > 0.02;
+        this.binHands.visible = r > 0.02 || !!this.bagDrag;
+        if (this.bagDrag) {
+          const mesh = this.bagMeshes.get(this.bagDrag.doorId + '#' + this.bagDrag.idx);
+          if (mesh) {
+            const wp = new THREE.Vector3(); mesh.getWorldPosition(wp);
+            this.binHands.position.lerpVectors(this.camera.position, wp, 0.82);
+            this.binHands.quaternion.copy(this.camera.quaternion); this.binHands.rotateY(Math.PI / 2);
+            // 作用中的手往前伸
+            const L = this.bagDrag.hand === 'L';
+            this.binHands.children.forEach((c, i) => { const left = i < 2; c.position.x = (i % 2 ? 0.06 : -0.12) + ((left === L) ? 0.06 : -0.04); c.visible = true; });
+            return void 0;
+          }
+        }
         const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
         this.binHands.position.copy(this.camera.position).addScaledVector(fwd, 0.35 + 0.25 * r).add(new THREE.Vector3(0, -0.22 + 0.12 * r, 0));
         this.binHands.quaternion.copy(this.camera.quaternion); this.binHands.rotateY(Math.PI / 2);

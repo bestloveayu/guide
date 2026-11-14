@@ -1,7 +1,7 @@
 // 飛行模擬引擎：階段時間軸、任務佇列、移動、評分、組員分派
 import { PHASES, RANKS, rankOf, DEFAULT_CREW, ANNOUNCEMENTS, PRIORITY, PILOTS, MEALS, DRINKS } from './data.js';
 import { BAG_COLORS } from './art.js';
-import { buildGrid, findPath, approachPoint, findSeat, findFixture, rowsOf, walkable, slideMove, roomLayout, binDoors, collides, lavLayout, binCapacity } from './layout.js';
+import { buildGrid, findPath, approachPoint, findSeat, findFixture, rowsOf, walkable, slideMove, roomLayout, binDoors, collides, lavLayout, binCapacity, binSpot } from './layout.js';
 
 const WALK_SPEED = 1.7; // m/s
 const lerp = (a, b, t) => a + (b - a) * Math.max(0, Math.min(1, t));
@@ -13,7 +13,8 @@ export class Flight {
     this.profile = profile;
     this.hooks = hooks || {};
     this.rank = rankOf(profile.xp);
-    this.grid = buildGrid(aircraft);
+    this.occupied = new Set(scenario.passengers.map((p) => p.seat));
+    this.grid = buildGrid(aircraft, {}, this.occupied);
     this.rows = rowsOf(aircraft).filter((r) => r.seats.some((s) => !s.removed));
     this.timeScale = scenario.timeScale || 1;
     this.phaseIdx = 0;
@@ -93,7 +94,7 @@ export class Flight {
     if (!task) return;
     if (task.def.kind === 'bins') {
       const open = this.binsInfo.doors.filter((d) => this.binOpen[d.id] && !this.binJobs[d.id]).sort((a, c) => Math.abs(a.x - this.player.x) - Math.abs(c.x - this.player.x))[0];
-      if (open) this.walkTo({ x: open.x, y: open.side * 0.15 });
+      if (open) this.walkTo(binSpot(open, 0.4));
       return;
     }
     if (task.def.kind === 'service') {
@@ -268,7 +269,7 @@ export class Flight {
     this.hooks.onTaskChange && this.hooks.onTaskChange();
   }
   hint(msg, key) { if (this.warnT['h' + key] != null && this.totalT - this.warnT['h' + key] < 3) return; this.warnT['h' + key] = this.totalT; this.say('系統', msg, 'warn'); }
-  rebuildGrid() { this.grid = buildGrid(this.ac, this.doorOpen); }
+  rebuildGrid() { this.grid = buildGrid(this.ac, this.doorOpen, this.occupied); }
   fixtureDist(f, who = this.player) { const dx = Math.max(0, Math.abs(who.x - f.x) - f.w / 2), dy = Math.max(0, Math.abs(who.y - f.y) - f.d / 2); return Math.hypot(dx, dy); }
 
   nearestPassenger(maxDx = 0.85, maxDy = 2.6) {
@@ -328,6 +329,12 @@ export class Flight {
         }
       }
     }
+    // 推餐車到駕駛艙詢問駕駛員
+    const ckf = this.cockpitFixture();
+    if (ckf && this.cart.state === 'out') {
+      const r = roomLayout(ckf, this.ac);
+      if (Math.hypot(pl.x - r.door.x, pl.y - r.door.y) < 1.4 || this.insideRoom(ckf)) acts.unshift({ id: 'pilotsvc', label: '詢問機長與副駕駛要不要用餐、喝飲料', run: () => this.pilotServiceStart(ckf), task: true });
+    }
     // 餐車
     const gal = this.galleyFixture();
     if (gal && this.cart.state === 'stowed' && this.fixtureDist(gal) < 1.3) acts.push({ id: 'cart:' + gal.id, label: '推出餐車', run: () => this.pushCart() });
@@ -337,14 +344,14 @@ export class Flight {
       if (srow) acts.unshift({ id: 'serve:' + srow.row, label: `為第 ${srow.row} 排旅客送餐（${this.rowUnserved(srow).length} 位）`, run: () => this.openService(srow), task: true });
     }
     // 行李櫃（伸手可及：同側、前後 0.8 m 內）
-    const reach = this.binsInfo.doors.filter((b) => pl.x > b.x0 - 0.3 && pl.x < b.x1 + 0.3 && Math.abs(pl.y - b.side * this.binsInfo.inner) < 1.45)
+    const reach = this.binsInfo.doors.filter((b) => pl.x > b.x0 - 0.3 && pl.x < b.x1 + 0.3 && Math.abs(pl.y - b.edgeY) < 1.45 && (pl.y - b.edgeY) * b.face > -0.2)
       .sort((a, b) => Math.abs(pl.x - a.x) + Math.abs(pl.y - a.side * 2) * 0.1 - (Math.abs(pl.x - b.x) + Math.abs(pl.y - b.side * 2) * 0.1));
     reach.slice(0, 2).forEach((b) => {
-      const side = b.side < 0 ? '左' : '右';
+      const side = b.center ? `中間${b.side < 0 ? '左' : '右'}` : b.side < 0 ? '左' : '右';
       if (this.binOpen[b.id]) {
         const n = this.messyBags(b.id);
         acts.push({ id: b.id, label: `整理${side}側行李櫃${n ? `（${n} 件沒放好）` : ''}`, run: () => this.enterBinView(b) });
-        acts.push({ id: 'close:' + b.id, label: `關上${side}側行李櫃`, run: () => this.toggleBin(b) });
+        acts.push({ id: 'close:' + b.id, label: `把${side}側行李櫃往上推關上`, run: () => this.toggleBin(b) });
       } else acts.push({ id: b.id, label: `打開${side}側行李櫃`, run: () => this.enterBinView(b) });
     });
     // 地上的掉落物
@@ -509,7 +516,7 @@ export class Flight {
       const d = this.binDoor(doorId);
       const a = d && this.availableActions().find((x) => x.id === d.id);
       if (a) { this.enterBinView(d); return; }
-      if (d) { this.walkTo({ x: d.x, y: d.side * 0.15 }); this.pendingProp = d.id; }
+      if (d) { this.walkTo(binSpot(d, 0.4)); this.pendingProp = d.id; }
       return;
     }
     const f = this.ac.fixtures.find((x) => x.id === id);
@@ -520,7 +527,7 @@ export class Flight {
     if (this.pendingProp === id && !this.player.path.length) { this.pendingProp = null; this.hint('距離太遠或目前無法操作。', 'prop'); return; }
     let target = null;
     const b = this.binsInfo.doors.find((d) => d.id === id);
-    if (b) target = { x: b.x, y: b.side * 0.15 };
+    if (b) target = binSpot(b, 0.4);
     if (f) target = f.type === 'lav' ? (() => { const r = lavLayout(f, this.ac); return { x: r.door.x, y: r.door.y }; })() : (f.type === 'cockpit' || f.type === 'crewrest') ? (() => { const r = roomLayout(f, this.ac); return { x: r.door.x, y: r.door.y }; })() : approachPoint(this.ac, this.grid, f);
     if (target) { this.walkTo(target); this.pendingProp = id; }
   }
@@ -745,12 +752,22 @@ export class Flight {
     if (!this.binOpen[b.id]) this.toggleBin(b);
     if (!this.binOpen[b.id]) return;
     this.binView = b.id; this.player.path = [];
-    const spot = { x: b.x, y: b.side * Math.max(0, this.binsInfo.inner - 0.35) };
+    const spot = binSpot(b, 0.35);
     if (!collides(this.grid, spot.x, spot.y)) Object.assign(this.player, spot);
     const n = this.messyBags(b.id);
-    this.say('系統', n ? `櫃內有 ${n} 件行李沒放好（突出、歪斜），點行李或按按鈕把它推到底擺正。` : '行李都放好了，可以關上櫃門。', 'info');
+    this.say('系統', n ? `櫃內有 ${n} 件行李沒放好。用滑鼠抓住行李：左鍵＝左手、右鍵＝右手，往上拖把行李推進去，左右拖把它擺正。` : '行李都放好了，可以把櫃門往上推關上。', 'info');
   }
   exitBinView() { this.binView = null; }
+  // 滑鼠操作行李：push 0→1 往櫃內推、skew 歪斜程度（0 為擺正）
+  handleBag(doorId, idx, dPush, dSkew) {
+    const bag = (this.binBags[doorId] || [])[idx];
+    if (!bag || bag.tidy) return;
+    if (bag.push == null) { bag.push = 0; bag.skew = idx % 2 ? 1 : -1; }
+    bag.push = Math.max(0, Math.min(1, bag.push + dPush));
+    bag.skew = Math.max(-1.2, Math.min(1.2, bag.skew + dSkew));
+    if (bag.push >= 1 && Math.abs(bag.skew) < 0.22) this.tidyBag(doorId, idx);
+    else if (bag.push >= 1 && !bag.warned) { bag.warned = true; this.hint('行李還歪著，左右拖曳把它擺正。', 'skew'); }
+  }
   tidyBag(doorId, idx) {
     const bag = (this.binBags[doorId] || [])[idx];
     if (!bag || bag.tidy) return;
@@ -760,8 +777,8 @@ export class Flight {
   }
   binActions() {
     const id = this.binView, b = this.binDoor(id), acts = [];
-    (this.binBags[id] || []).forEach((bag, i) => { if (!bag.tidy) acts.push({ id: `tidy|${i}`, label: `整理第 ${i + 1} 件行李（推到底、擺正）`, run: () => this.tidyBag(id, i), task: true }); });
-    acts.push({ id: 'binclose', label: '關上櫃門', run: () => { this.toggleBin(b); if (!this.binOpen[id]) this.exitBinView(); } });
+    (this.binBags[id] || []).forEach((bag, i) => { if (!bag.tidy) acts.push({ id: `tidy|${i}`, label: `直接整理第 ${i + 1} 件行李`, run: () => this.tidyBag(id, i), task: true }); });
+    acts.push({ id: 'binclose', label: '把櫃門往上推關上', run: () => { this.toggleBin(b); if (!this.binOpen[id]) this.exitBinView(); } });
     acts.push({ id: 'binexit', label: '離開（不關門）', run: () => this.exitBinView() });
     return acts;
   }
@@ -806,9 +823,8 @@ export class Flight {
   }
   findBinFor(seat) {
     const s = findSeat(this.ac, seat); if (!s) return null;
-    const side = s.y < 0 ? -1 : 1;
-    return this.binsInfo.doors.filter((d) => d.side === side && Math.abs(d.x - s.x) < 2.6 && (this.binBags[d.id] || []).length < binCapacity(d))
-      .sort((a, b) => Math.abs(a.x - s.x) - Math.abs(b.x - s.x))[0] || null;
+    return this.binsInfo.doors.filter((d) => Math.abs(d.x - s.x) < 2.6 && (this.binBags[d.id] || []).length < binCapacity(d))
+      .sort((a, b) => Math.abs(a.x - s.x) + Math.abs(a.bagY - s.y) * 1.5 - Math.abs(b.x - s.x) - Math.abs(b.bagY - s.y) * 1.5)[0] || null;
   }
   updateBoarding(gdt) {
     if (!this.boarding || this.phase.id !== 'boarding') return;
@@ -916,6 +932,40 @@ export class Flight {
     this.say('系統', '已清理地上的飲料與杯子。', 'good');
   }
 
+  // =================== 駕駛艙餐飲 ===================
+  pilotServiceStart(f) {
+    const r = roomLayout(f, this.ac), bx = f.x + f.w / 2;
+    const sterile = ['pushback', 'taxi', 'takeoff', 'climb', 'descent', 'landing'].includes(this.phase.id);
+    if (this.cart.x < bx - 0.05) {
+      this.violation('把餐車推進駕駛艙', 'cartck');
+      this.say(PILOTS.captain, '餐車不准推進駕駛艙！擋住出入口太危險了，立刻推出去！', 'bad');
+      this.say(this.judgeName('senior'), '駕駛艙的餐點要用托盤送，餐車停在外面並踩好煞車！', 'bad');
+      return;
+    }
+    if (sterile) { this.violation(`${this.phase.name}期間打擾駕駛艙`, 'ckserve'); this.say(PILOTS.captain, `現在是${this.phase.name}階段，駕駛艙淨空，不要來打擾！`, 'bad'); return; }
+    if (!this.doorOpen[f.id]) { this.say(PILOTS.fo, '（內線）請先打內線說明來意，我們確認後才會開門。', 'warn'); this.hint('先選「請求進入駕駛艙」依程序請求開門。', 'ckphone'); return; }
+    this.modalOpen = true;
+    this.hooks.onPilotService && this.hooks.onPilotService();
+  }
+  pilotServe(capMeal, foMeal, capDrink, foDrink) {
+    this.modalOpen = false;
+    const notes = [], name = (id) => (MEALS.find((m) => m.id === id) || DRINKS.find((d) => d.id === id) || {}).name || id;
+    let ok = true;
+    if (capMeal !== 'none' && capMeal === foMeal) {
+      ok = false; this.violation('機長與副駕駛吃同一種餐點', 'samemeal');
+      notes.push([PILOTS.captain, '我們兩個不能吃同一種餐，萬一食物有問題兩個駕駛都會倒下！換一份。', 'bad']);
+      this.say(this.judgeName('senior'), '機長和副駕駛的餐點一定要不同，這是基本常識！', 'bad');
+    }
+    for (const [who, d] of [[PILOTS.captain, capDrink], [PILOTS.fo, foDrink]]) {
+      const dd = DRINKS.find((x) => x.id === d) || {};
+      if (dd.alcohol) { ok = false; this.violation('提供酒精飲料給駕駛員', 'pilotalc'); notes.push([who, '你在開玩笑嗎？值勤中的駕駛員絕對不能喝酒！', 'bad']); }
+    }
+    if (ok) notes.push([PILOTS.captain, `謝謝，我要${name(capMeal)}和${name(capDrink)}，放在中央操縱台旁邊就好，小心別碰到儀表。`, 'good']);
+    notes.forEach(([w, t, tone]) => this.say(w, t, tone));
+    if (ok) this.stats.pilotServed = true;
+    return { ok, notes };
+  }
+
   // =================== 駕駛艙：離開、動用設備 ===================
   touchCockpitControls() {
     this.cockpit.touch = (this.cockpit.touch || 0) + 1;
@@ -1002,7 +1052,7 @@ export class Flight {
         const d = this.binsInfo.doors.filter((x) => this.binOpen[x.id] && !this.binJobs[x.id] && Math.abs(x.x - this.player.x) > 1.2).sort((a, b2) => Math.abs(a.x - c.x) - Math.abs(b2.x - c.x))[0];
         if (!d) { if (!c.path.length && c.home && Math.hypot(c.x - c.home.x, c.y - c.home.y) > 0.5) c.path = findPath(this.grid, c, c.home); continue; }
         c.binJob = d.id; this.binJobs[d.id] = c.id; c.binT = 0;
-        c.path = findPath(this.grid, c, { x: d.x, y: d.side * 0.12 });
+        c.path = findPath(this.grid, c, binSpot(d, 0.4));
       }
     } else this.npcs.forEach((c) => { if (c.binJob) { delete this.binJobs[c.binJob]; c.binJob = null; c.reaching = false; } });
     for (const c of this.npcs) {

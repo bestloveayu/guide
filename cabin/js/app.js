@@ -1,5 +1,5 @@
 // 主程式：狀態、介面面板、模式切換、模擬流程
-import { PHASES, RANKS, rankOf, PRIORITY, PAX_TYPES, FIXTURE_TYPES, SEAT_CLASS, AIRLINES, AIRCRAFT_SPECS, ANNOUNCEMENTS, phaseName, defaultScenario, MEALS, DRINKS } from './data.js';
+import { PHASES, RANKS, rankOf, PRIORITY, PAX_TYPES, FIXTURE_TYPES, SEAT_CLASS, AIRLINES, AIRCRAFT_SPECS, ANNOUNCEMENTS, phaseName, defaultScenario, MEALS, DRINKS, PILOTS as PILOTS_NAMES } from './data.js';
 import { buildTemplate, buildFromSpec, findSeat, rowsOf, removeRows, insertRowAfter, generateInRect, newId, buildGrid, walkable, approachPoint, findFixture, slideMove, findPath } from './layout.js';
 import { load, save, download, readFile, resetAll } from './store.js';
 import { View2D } from './view2d.js';
@@ -144,6 +144,9 @@ class App {
     if (sim && !sim.ended) {
       const mv = this.v3.fpMove(dt);
       if (mv) sim.moveManual(mv.dx, mv.dy);
+      // 整理行李櫃時一律切到第一人稱，結束後回到原本視角
+      if (sim.binView && this.view !== 'fp') { this.viewBeforeBin = this.view; this.setView('fp'); }
+      else if (!sim.binView && this.viewBeforeBin) { const v = this.viewBeforeBin; this.viewBeforeBin = null; this.setView(v); }
       // 推著餐車按住 Shift 加速 → 物品掉落
       sim.cartRush(dt, !!mv && !!(this.v3.keys.ShiftLeft || this.v3.keys.ShiftRight) && sim.cart && sim.cart.state === 'out');
       sim.update(dt);
@@ -652,6 +655,7 @@ class App {
         onChat: (seat, info) => this.showChat(seat, info),
         onCockpit: () => this.showCockpit(),
         onService: (info) => this.showService(info),
+        onPilotService: () => this.showPilotService(),
         onCallBell: (seat) => { this.chime(); this.toast('服務鈴', `${seat} 旅客按了服務鈴。`, 'warn'); this.logLine('服務鈴', `${seat} 旅客按了服務鈴`); },
         onArrest: () => { this.closeModal(); if (this.view === 'fp' && this.sim) { const ck = this.aircraft().fixtures.find((f) => f.type === 'cockpit'); if (ck) { const yaw = Math.atan2(0 - this.sim.player.y, ck.x + ck.w / 2 + 1 - this.sim.player.x); this.v3.fp.yaw = yaw; this.v3.fp.pitch = 0; } } },
         onEnd: (r) => this.endFlight(r),
@@ -806,6 +810,28 @@ class App {
       h('div', { class: 'muted' }, `特殊餐名單：${special.join('、') || '無'}　｜　已送出 ${sim.service.total} 份（目標 ${sim.service.target}）`),
       body), true);
     next();
+  }
+
+  // ---- 駕駛艙餐飲 ----
+  showPilotService() {
+    const sim = this.sim;
+    const pick = (list) => { let v = null; const box = h('div', { class: 'choice' }, list.map((it) => { const b = h('button', { onclick: () => { v = it.id; [...box.children].forEach((x) => x.classList.toggle('on', x === b)); } }, it.name); return b; })); return { box, get: () => v }; };
+    const meals = [...MEALS.filter((m) => !m.special), { id: 'none', name: '不用餐' }];
+    const cm = pick(meals), fm = pick(meals), cd = pick(DRINKS), fd = pick(DRINKS);
+    const out = h('div');
+    const send = h('button', { class: 'primary', onclick: () => {
+      if (!cm.get() || !fm.get() || !cd.get() || !fd.get()) { this.toast('系統', '請為兩位駕駛員都選好餐點與飲料。', 'warn'); return; }
+      const r = sim.pilotServe(cm.get(), fm.get(), cd.get(), fd.get());
+      send.remove(); out.append(...r.notes.map(([w, t]) => h('div', { class: 'speaker' }, h('div', { class: 'ava' }, '👨‍✈️'), h('div', { class: 'bubble' }, h('b', {}, w), t))));
+      done.textContent = '完成'; done.className = 'primary';
+    } }, '用托盤送進駕駛艙');
+    const done = h('button', { onclick: () => { this.closeModal(); sim.cancelModal(); } }, '取消');
+    this.openModal(h('div', {},
+      h('h2', {}, '☕ 駕駛艙餐飲'),
+      h('p', { class: 'muted' }, '餐車停在駕駛艙門外，用托盤送入。提醒：機長與副駕駛不可吃同一種餐點，值勤中不可飲酒。'),
+      h('label', {}, `${PILOTS_NAMES.captain} 餐點`), cm.box, h('label', {}, '飲料'), cd.box,
+      h('label', {}, `${PILOTS_NAMES.fo} 餐點`), fm.box, h('label', {}, '飲料'), fd.box,
+      out, h('div', { class: 'btns', style: 'justify-content:flex-end' }, send, done)), true);
   }
 
   // ---- 駕駛艙門內線 ----

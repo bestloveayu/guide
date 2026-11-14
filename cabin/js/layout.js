@@ -228,9 +228,13 @@ export function lavLayout(f, ac) {
 }
 
 // doorOpen: { [fixtureId]: true } 表示該房門開啟（可通行）
-function obstacleRects(ac, doorOpen = {}) {
+function obstacleRects(ac, doorOpen = {}, occupied = null) {
   const rects = [];
-  activeSeats(ac).forEach((s) => rects.push({ x0: s.x - s.d / 2, x1: s.x + s.d / 2, y0: s.y - s.w / 2, y1: s.y + s.w / 2 }));
+  activeSeats(ac).forEach((s) => {
+    // 空座位：只有椅背擋路（可以從腿部空間橫向走進一排）
+    if (occupied && !occupied.has(s.id) && s.cls !== 'J') rects.push({ x0: s.x + s.d * 0.3, x1: s.x + s.d / 2 + 0.06, y0: s.y - s.w / 2, y1: s.y + s.w / 2 });
+    else rects.push({ x0: s.x - s.d / 2, x1: s.x + s.d / 2, y0: s.y - s.w / 2, y1: s.y + s.w / 2 });
+  });
   ac.fixtures.forEach((f) => {
     if (f.type === 'door') return;
     if (f.type === 'lav') {
@@ -260,11 +264,18 @@ export function binDoors(ac) {
     else zones.push([rw.x - half - 0.05, rw.x + half + 0.05]);
   });
   const doors = [];
+  const R = ac.width / 2, inner = R - 0.74, wide = ac.width > 4.6;
   zones.forEach(([a, b], zi) => {
     const n = Math.max(1, Math.round((b - a) / 1.52)), w = (b - a) / n;
-    for (let k = 0; k < n; k++) for (const side of [-1, 1]) doors.push({ id: `bin:${zi}:${k}:${side}`, side, x0: a + k * w, x1: a + (k + 1) * w, x: a + (k + 0.5) * w });
+    for (let k = 0; k < n; k++) {
+      const base = { x0: a + k * w, x1: a + (k + 1) * w, x: a + (k + 0.5) * w };
+      // 兩側行李櫃：櫃門邊緣在 side*inner，面向走道（face = -side）
+      for (const side of [-1, 1]) doors.push({ id: `bin:${zi}:${k}:${side}`, side, center: false, face: -side, edgeY: side * inner, bagY: side * (R - 0.45), ...base });
+      // 雙走道機型的中央行李櫃：左右兩半各面向一條走道
+      if (wide) for (const side of [-1, 1]) doors.push({ id: `bin:${zi}:${k}:c${side}`, side, center: true, face: side, edgeY: side * 0.75, bagY: side * 0.4, ...base });
+    }
   });
-  return { zones, doors, inner: ac.width / 2 - 0.74 };
+  return { zones, doors, inner };
 }
 
 // 圓形 (x, y, r) 是否與任何障礙或機身側牆重疊
@@ -279,12 +290,12 @@ export function collides(grid, x, y, r = BODY_R) {
   return false;
 }
 
-export function buildGrid(ac, doorOpen = {}) {
+export function buildGrid(ac, doorOpen = {}, occupied = null) {
   const W = ac.width;
   const nx = Math.ceil(ac.length / CELL) + 1;
   const ny = Math.round(W / CELL) + 1;
   const g = new Uint8Array(nx * ny); // 1 = 阻擋
-  const grid = { nx, ny, g, W, L: ac.length, rects: obstacleRects(ac, doorOpen) };
+  const grid = { nx, ny, g, W, L: ac.length, rects: obstacleRects(ac, doorOpen, occupied) };
   for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
     const p = fromCell(grid, i, j);
     if (collides(grid, p.x, p.y, BODY_R + 0.02)) g[j * nx + i] = 1;
@@ -423,12 +434,14 @@ export function approachPoint(ac, grid, target) {
 
 // ---- 行李櫃內的行李槽位（模擬與 3D 共用）----
 export function binCapacity(door) { return Math.max(1, Math.floor((door.x1 - door.x0 - 0.12) / 0.42)); }
+export const binSpot = (d, off = 0.35) => ({ x: d.x, y: d.edgeY + d.face * off });
 // 回傳行李在模擬座標中的位置與姿態：tidy = 推到底擺正；否則斜放並突出櫃外
 export function bagPose(door, idx, tidy, W) {
   const cap = binCapacity(door), slotW = (door.x1 - door.x0 - 0.12) / cap;
   const R = W / 2;
   const x = door.x0 + 0.06 + (idx + 0.5) * slotW;
-  if (tidy) return { x, y: door.side * (R - 0.45), h: 1.77, yaw: 0, roll: 0 };
+  const by = door.bagY ?? door.side * (R - 0.45), ey = door.edgeY ?? door.side * (R - 0.74), face = door.face ?? -door.side;
+  if (tidy) return { x, y: by, h: door.center ? 1.86 : 1.77, yaw: 0, roll: 0 };
   const k = idx % 2 ? 1 : -1;
-  return { x: x + k * 0.04, y: door.side * (R - 0.66), h: 1.81, yaw: 0.5 * k, roll: 0.22 * door.side };
+  return { x: x + k * 0.04, y: ey - face * 0.08, h: door.center ? 1.9 : 1.81, yaw: 0.5 * k, roll: -0.22 * face };
 }
