@@ -365,8 +365,6 @@ export class View3D {
       const cl = new THREE.Mesh(sweep(smoothProfile([[ix + 0.3, 2.1], [ix * 0.55, 2.24], [ix * 0.25, 2.29], [0, 2.3]], 6), 0, L, s), ceil); cl.userData.ceiling = true; this.cabin.add(cl);
       // 行李櫃：只裝在座位區上方（艙門、廚房區沒有行李櫃，與真實機艙相同）
       for (const [bx0, bx1] of binZones) {
-        const under = new THREE.Mesh(sweep([[R - 0.17, 1.64], [ix + 0.03, 1.64]], bx0, bx1, s), binUnder); under.userData.ceiling = true; this.cabin.add(under);
-        const lip = new THREE.Mesh(sweep(smoothProfile([[ix + 0.03, 1.64], [ix - 0.005, 1.655], [ix - 0.012, 1.7], [ix, 1.72]], 4), bx0, bx1, s), this.clipped(m.shellDark)); lip.userData.ceiling = true; this.cabin.add(lip);
         const cove = new THREE.Mesh(new THREE.BoxGeometry(bx1 - bx0, 0.006, 0.05), glowMat); cove.position.set((bx0 + bx1) / 2, 2.075, s * (ix + 0.29)); cove.userData.ceiling = true; this.cabin.add(cove);
         const top = new THREE.Mesh(sweep([[ix + 0.24, 2.08], [ix + 0.3, 2.1]], bx0, bx1, s), bin); top.userData.ceiling = true; this.cabin.add(top);
         // 兩端封板
@@ -387,12 +385,23 @@ export class View3D {
       bd.doors.filter((d) => d.side === -s && !d.center).forEach((d) => {
         const hy2 = 2.05, hz2 = s * (R - 0.2);
         const pivot = new THREE.Group(); pivot.position.set(0, hy2, hz2);
-        const dg = sweep(doorProfile, d.x0 + 0.004, d.x1 - 0.004, s); dg.translate(0, -hy2, -hz2);
+        const xa = d.x0 + 0.004, xb = d.x1 - 0.004;
+        const dg = sweep(doorProfile, xa, xb, s); dg.translate(0, -hy2, -hz2);
         const dm = new THREE.Mesh(dg, bin); dm.userData.propId = d.id;
+        const ug = sweep([[R - 0.17, 1.64], [ix + 0.03, 1.64]], xa, xb, s); ug.translate(0, -hy2, -hz2);
+        const lg = sweep(smoothProfile([[ix + 0.03, 1.64], [ix - 0.005, 1.655], [ix - 0.012, 1.7], [ix, 1.72]], 4), xa, xb, s); lg.translate(0, -hy2, -hz2);
+        const bucket = [new THREE.Mesh(ug, binUnder), new THREE.Mesh(lg, this.clipped(m.shellDark))];
+        // 櫃體兩側側板（打開時看得到斗型）
+        for (const ex of [xa, xb]) {
+          const sh = new THREE.Shape(); const pts = [[R - 0.17, 1.64], [ix + 0.03, 1.64], [ix - 0.012, 1.7], [ix, 1.84], [ix + 0.12, 2.04], [R - 0.2, 2.04]];
+          sh.moveTo(pts[0][0], pts[0][1]); pts.slice(1).forEach(([a2, b2]) => sh.lineTo(a2, b2));
+          const cg = new THREE.ShapeGeometry(sh); cg.rotateY(-Math.PI / 2);
+          const cm = new THREE.Mesh(cg, binUnder); cm.position.set(ex, -hy2, -hz2); cm.scale.z = s; bucket.push(cm);
+        }
         const handle = new THREE.Mesh(new RoundedBoxGeometry(0.22, 0.022, 0.03, 2, 0.01), seamMat); handle.position.set(d.x, 1.7 - hy2, s * (ix - 0.014) - hz2); handle.userData.propId = d.id;
-        pivot.add(dm, handle); pivot.userData.ceiling = true;
+        pivot.add(dm, handle, ...bucket); pivot.userData.ceiling = true;
         this.cabin.add(pivot); this.propMeshes.push(dm, handle);
-        this.pivots.set(d.id, { pivot, axis: 'x', base: 0, dir: this.downSign(new THREE.Vector3(0, 1.72 - hy2, s * ix - hz2)), max: 0.48, cur: 0 });
+        this.pivots.set(d.id, { pivot, axis: 'x', base: 0, dir: this.downSign(new THREE.Vector3(0, 1.72 - hy2, s * ix - hz2)), max: 0.42, cur: 0 });
       });
       const seams = new THREE.InstancedMesh(new THREE.BoxGeometry(0.006, 0.34, 0.012), seamMat, bd.doors.length);
       bd.doors.forEach((d, k) => seams.setMatrixAt(k, d.center ? M(0, -20, 0) : M(d.x0, 1.88, s * (ix - 0.012), s > 0 ? 0.1 : -0.1, 0, 0)));
@@ -405,7 +414,6 @@ export class View3D {
       binZones.forEach(([a, b]) => {
         const len = b - a, cx = (a + b) / 2;
         const add = (geo, mat, x, y, z) => { const o = new THREE.Mesh(geo, mat); o.position.set(x, y, z); o.userData.ceiling = true; this.cabin.add(o); return o; };
-        add(new RoundedBoxGeometry(len, 0.03, 1.5, 2, 0.01), binU, cx, 1.715, 0);
         add(new RoundedBoxGeometry(len, 0.03, 1.24, 2, 0.01), bin, cx, 2.17, 0);
         add(new THREE.BoxGeometry(len, 0.44, 0.02), binU, cx, 1.94, 0);
         for (const ex of [a, b]) add(new THREE.BoxGeometry(0.02, 0.46, 1.5), binU, ex, 1.94, 0);
@@ -415,14 +423,15 @@ export class View3D {
       const cProfile = smoothProfile([[0.75, 1.73], [0.775, 1.85], [0.765, 1.98], [0.71, 2.1], [0.62, 2.17]], 6);
       bd.doors.filter((d) => d.center).forEach((d) => {
         const ts = -d.side; // three.js z 方向
-        const hy2 = 2.17, hz2 = ts * 0.45;
+        const hy2 = 2.12, hz2 = ts * 0.06;
         const pivot = new THREE.Group(); pivot.position.set(0, hy2, hz2);
         const dg = sweep(cProfile, d.x0 + 0.004, d.x1 - 0.004, ts); dg.translate(0, -hy2, -hz2);
         const dm = new THREE.Mesh(dg, bin); dm.userData.propId = d.id;
+        const bot = new THREE.Mesh(new THREE.BoxGeometry(d.x1 - d.x0 - 0.01, 0.025, 0.74), this.clipped(m.binUnder)); bot.position.set(d.x, 1.72 - hy2, ts * 0.38 - hz2);
         const handle = new THREE.Mesh(new RoundedBoxGeometry(0.22, 0.022, 0.03, 2, 0.01), this.clipped(m.shellDark)); handle.position.set(d.x, 1.76 - hy2, ts * 0.765 - hz2); handle.userData.propId = d.id;
-        pivot.add(dm, handle); pivot.userData.ceiling = true;
+        pivot.add(dm, handle, bot); pivot.userData.ceiling = true;
         this.cabin.add(pivot); this.propMeshes.push(dm, handle);
-        this.pivots.set(d.id, { pivot, axis: 'x', base: 0, dir: this.downSign(new THREE.Vector3(0, 1.73 - hy2, ts * 0.75 - hz2)), max: 0.42, cur: 0 });
+        this.pivots.set(d.id, { pivot, axis: 'x', base: 0, dir: this.downSign(new THREE.Vector3(0, 1.73 - hy2, ts * 0.75 - hz2)), max: 0.38, cur: 0 });
       });
     }
 
@@ -1031,13 +1040,16 @@ export class View3D {
           if (!mesh) {
             mesh = makeBinBag(bag.col, bag.seed || i);
             mesh.traverse((o) => { if (o.isMesh) { o.userData.propId = `bag|${doorId}|${i}`; this.propMeshes.push(o); } });
+            const pv0 = this.pivots.get(doorId);
             const st = bag.spawn ? P(bag.spawn.x, bag.spawn.y, 1.5) : P(pose.x, pose.y, pose.h);
-            mesh.position.copy(st);
-            this.cabin.add(mesh); this.bagMeshes.set(key, mesh);
+            if (pv0) { pv0.pivot.add(mesh); st.sub(pv0.pivot.position); }
+            else this.cabin.add(mesh);
+            mesh.position.copy(st); this.bagMeshes.set(key, mesh);
           }
           const pv = this.pivots.get(doorId);
           mesh.visible = (fp || !!sim.binView) && (!!sim.binOpen[doorId] || (pv && pv.cur > 0.04));
           const tp = P(pose.x, pose.y, pose.h);
+          if (pv && mesh.parent === pv.pivot) tp.sub(pv.pivot.position);
           mesh.position.lerp(tp, k);
           mesh.rotation.y += (pose.yaw - mesh.rotation.y) * k;
           mesh.rotation.x += (-pose.roll - mesh.rotation.x) * k;
@@ -1055,6 +1067,7 @@ export class View3D {
         if (!w) {
           const p = this.app.scenario().passengers.find((x) => x.seat === seat) || { seat, name: '', type: 'normal' };
           w = { mesh: makePaxWalker(p), bag: b.bag ? makeSuitcase(b.col) : null, last: { x: b.x, y: b.y } };
+          w.mesh.rotation.y = b.heading;
           this.cabin.add(w.mesh); if (w.bag) this.cabin.add(w.bag);
           this.walkers.set(seat, w);
         }
@@ -1514,16 +1527,16 @@ export class View3D {
       this.lastWalker = { x: walker.x, y: walker.y };
       moving = moved > 0.0015;
       // 第一人稱：保留身體（低頭看得到腿、安全帶、手），只隱藏頭部
-      this.player.visible = true;
+      this.player.visible = !(this.mode === 'fp' && walker.inRow);
       this.player.userData.setHead && this.player.userData.setHead(this.mode !== 'fp');
       this.player.position.copy(P(walker.x, walker.y, walker.seated ? -0.4 : 0));
       if (walker.seated && !this.wasSeated && this.mode === 'fp') { this.fp.yaw = 0; this.fp.pitch = -0.95; }
       this.wasSeated = walker.seated;
       const serving = this.serveAnim && this.serveAnim.yaw != null;
-      if (moving || walker.seated || this.mode === 'fp' || serving) {
-        const target = walker.seated ? 0 : serving ? this.serveAnim.yaw : this.mode === 'fp' ? this.fpView.yaw : (walker.heading ?? 0);
+      if (moving || walker.seated || this.mode === 'fp' || serving || walker.inRow) {
+        const target = walker.seated ? 0 : serving ? this.serveAnim.yaw : walker.inRow ? Math.PI : this.mode === 'fp' ? this.fpView.yaw : (walker.heading ?? 0);
         let d = target - this.player.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d));
-        this.player.rotation.y += this.mode === 'fp' && !walker.seated && !serving ? d : d * Math.min(1, dt * 10);
+        this.player.rotation.y += this.mode === 'fp' && !walker.seated && !serving && !walker.inRow ? d : d * Math.min(1, dt * 10);
       }
       this.updateServe(sim, walker, t);
       if (this.tidyT && t - this.tidyT < 0.8) this.player.userData.setReach(Math.sin(((t - this.tidyT) / 0.8) * Math.PI));

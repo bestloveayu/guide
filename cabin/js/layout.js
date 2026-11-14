@@ -232,8 +232,9 @@ function obstacleRects(ac, doorOpen = {}, occupied = null) {
   const rects = [];
   activeSeats(ac).forEach((s) => {
     // 空座位：只有椅背擋路（可以從腿部空間橫向走進一排）
-    if (occupied && !occupied.has(s.id) && s.cls !== 'J') rects.push({ x0: s.x + s.d * 0.3, x1: s.x + s.d / 2 + 0.06, y0: s.y - s.w / 2, y1: s.y + s.w / 2 });
-    else rects.push({ x0: s.x - s.d / 2, x1: s.x + s.d / 2, y0: s.y - s.w / 2, y1: s.y + s.w / 2 });
+    // 座椅實際佔用：椅墊前緣到椅背後殼；有旅客的座位再加上膝蓋佔用的腿部空間
+    const knee = occupied && occupied.has(s.id) ? 0.2 : 0;
+    rects.push({ x0: s.x - s.d / 2 - 0.01 - knee, x1: s.x + s.d / 2 + 0.04, y0: s.y - s.w / 2, y1: s.y + s.w / 2, seat: true });
   });
   ac.fixtures.forEach((f) => {
     if (f.type === 'door') return;
@@ -445,3 +446,6 @@ export function bagPose(door, idx, tidy, W) {
   const k = idx % 2 ? 1 : -1;
   return { x: x + k * 0.04, y: ey - face * 0.08, h: door.center ? 1.9 : 1.81, yaw: 0.5 * k, roll: -0.22 * face };
 }
+
+// 側身擠進一排座位時使用的較小碰撞半徑（雙腿併攏、面向機頭）
+export const ROW_R = 0.09;

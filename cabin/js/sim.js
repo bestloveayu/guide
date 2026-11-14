@@ -1,7 +1,7 @@
 // 飛行模擬引擎：階段時間軸、任務佇列、移動、評分、組員分派
 import { PHASES, RANKS, rankOf, DEFAULT_CREW, ANNOUNCEMENTS, PRIORITY, PILOTS, MEALS, DRINKS } from './data.js';
 import { BAG_COLORS } from './art.js';
-import { buildGrid, findPath, approachPoint, findSeat, findFixture, rowsOf, walkable, slideMove, roomLayout, binDoors, collides, lavLayout, binCapacity, binSpot } from './layout.js';
+import { buildGrid, findPath, approachPoint, findSeat, findFixture, rowsOf, walkable, slideMove, roomLayout, binDoors, collides, lavLayout, binCapacity, binSpot, ROW_R, BODY_R } from './layout.js';
 
 const WALK_SPEED = 1.7; // m/s
 const lerp = (a, b, t) => a + (b - a) * Math.max(0, Math.min(1, t));
@@ -125,7 +125,14 @@ export class Flight {
     if (dx || dy) this.player.path = [];
     const ox = this.player.x, oy = this.player.y;
     if (this.cart.state === 'out') { dx *= 0.6; dy *= 0.6; }
+    const bx = this.player.x, by = this.player.y;
     slideMove(this.grid, this.player, dx, dy);
+    // 走道外的空座位排：側身、雙腳併攏才擠得進去（推餐車時不行）
+    if (this.player.x === bx && this.player.y === by && this.cart.state !== 'out' && (dx || dy)) slideMove(this.grid, this.player, dx * 0.5, dy * 0.5, ROW_R);
+    // 不能穿過其他人（登機中的旅客、組員）
+    const people = [...Object.values(this.boarding || {}).filter((o) => ['walk', 'stow', 'sit'].includes(o.state)), ...this.npcs];
+    if (people.some((o) => Math.hypot(o.x - this.player.x, o.y - this.player.y) < 0.42 && Math.hypot(o.x - bx, o.y - by) >= Math.hypot(o.x - this.player.x, o.y - this.player.y))) { this.player.x = bx; this.player.y = by; this.hint('前面有人，請稍候或換個方向。', 'people'); }
+    this.player.inRow = collides(this.grid, this.player.x, this.player.y, BODY_R);
     if (this.cart.state === 'out') {
       const mdx = this.player.x - ox, mdy = this.player.y - oy;
       const dir = Math.abs(mdx) > 0.002 && Math.abs(mdx) > Math.abs(mdy) ? Math.sign(mdx) : this.cart.dir;
@@ -786,6 +793,7 @@ export class Flight {
   // =================== 登機：旅客拖著登機箱入座 ===================
   initBoarding() {
     this.boardStart = { x: this.player.x, y: this.player.y };
+    this.boardDoor = findFixture(this.ac, 'L1') || this.ac.fixtures.find((f) => f.type === 'door');
     const seats = Object.keys(this.mood);
     const rowOf = (s) => parseInt(s, 10) || 0;
     const order = seats.slice().sort((a, b) => rowOf(b) - rowOf(a) + (Math.random() - 0.5) * 8); // 大致由後往前登機
@@ -832,11 +840,19 @@ export class Flight {
       if (b.state === 'wait') {
         if (this.phaseT < b.t) continue;
         // 艙門口還有人時先等一下，避免疊在一起
-        if (Object.values(this.boarding).some((o) => o !== b && o.state === 'walk' && Math.hypot(o.x - this.boardStart.x, o.y - this.boardStart.y) < 0.9)) continue;
+        if (Object.values(this.boarding).some((o) => o !== b && o.state === 'walk' && (Math.hypot(o.x - this.boardStart.x, o.y - this.boardStart.y) < 0.9 || Math.abs(o.y) > this.ac.width / 2 - 0.5))) continue;
         const s = findSeat(this.ac, seat);
         b.state = 'walk'; Object.assign(b, this.boardStart);
         b.dest = approachPoint(this.ac, this.grid, s);
         b.path = findPath(this.grid, b, b.dest);
+        // 從艙門外的空橋走進來，再轉進走道
+        const bd = this.boardDoor;
+        if (bd) {
+          const sg = Math.sign(bd.y) || -1, R = this.ac.width / 2;
+          Object.assign(b, { x: bd.x, y: sg * (R + 0.7) });
+          b.path.unshift({ x: bd.x, y: sg * (R - 0.35) }, { x: this.boardStart.x, y: this.boardStart.y });
+          b.heading = Math.atan2(-sg, 0);
+        }
       } else if (b.state === 'walk') {
         // 被擋住：玩家站在前方走道上
         const nx = b.path[0];
