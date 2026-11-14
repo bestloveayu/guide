@@ -495,12 +495,16 @@ export function makeCrew(u) {
   }
   const torso = new THREE.Mesh(torsoLathe([[0.16, 0], [0.145, 0.12], [0.165, 0.3], [0.19, 0.44], [0.17, 0.52], [0.09, 0.58], [0.0, 0.59]], 24), cloth(u.jacket));
   torso.position.y = 0.96; torso.scale.set(0.78, 1, 1.05); g.add(torso);
+  if (!u.civilian) {
   const shirt = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.2, 3, 1, true), mat(u.shirt, { side: THREE.DoubleSide }));
   shirt.position.set(0.135, 1.45, 0); shirt.rotation.set(0, Math.PI / 2, Math.PI); shirt.scale.set(1, 1, 0.4); g.add(shirt);
   for (const y of [1.22, 1.1]) { const b = new THREE.Mesh(sph(0.014, 10, 8), gold); b.position.set(0.145, y, 0); g.add(b); }
   const wing = new THREE.Mesh(new RoundedBoxGeometry(0.012, 0.022, 0.1, 2, 0.005), gold); wing.position.set(0.15, 1.42, -0.09); g.add(wing);
   const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.068, 0.026, 10, 20), cloth(u.scarf)); scarf.rotation.x = Math.PI / 2; scarf.position.y = 1.535; g.add(scarf);
   for (const s of [-1, 1]) { const bow = new THREE.Mesh(sph(0.045, 12, 8), cloth(u.scarf)); bow.position.set(0.09, 1.5, s * 0.045); bow.scale.set(0.5, 0.8, 1.2); bow.rotation.x = s * 0.6; g.add(bow); }
+  } else {
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.02, 8, 18), cloth(shadeHex(u.jacket, 1.1))); collar.rotation.x = Math.PI / 2; collar.position.y = 1.53; g.add(collar);
+  }
   const arms = [];
   for (const s of [-1, 1]) {
     const pivot = new THREE.Group();
@@ -514,12 +518,12 @@ export function makeCrew(u) {
     g.add(pivot); arms.push(pivot);
   }
   const neck = new THREE.Mesh(cap(0.042, 0.06, 12), skinM); neck.position.y = 1.6; g.add(neck);
-  const head = new THREE.Mesh(headGeometry(), faceMaterial(u.skin, { female: !pants, makeup: !pants, brow: shadeHex(u.hair, 0.85), monolid: false }));
+  const head = new THREE.Mesh(headGeometry(), faceMaterial(u.skin, { female: u.female ?? !pants, makeup: u.civilian ? false : !pants, brow: shadeHex(u.hair, 0.85), monolid: !!u.monolid }));
   head.position.y = 1.725; head.scale.setScalar(1.05); g.add(head);
   for (const s of [-1, 1]) { const ear = new THREE.Mesh(sph(0.022, 10, 8), skinM); ear.position.set(-0.005, 1.735, s * 0.084); ear.scale.set(0.55, 1.25, 0.45); g.add(ear); }
   const hair = new THREE.Mesh(new THREE.SphereGeometry(0.115, 32, 18, 0, Math.PI * 2, 0, Math.PI * 0.6), hairM);
   hair.position.set(-0.016, 1.77, 0); hair.rotation.z = 0.36; hair.scale.set(1, 1.1, 0.88); g.add(hair);
-  if (!pants) { const bun = new THREE.Mesh(sph(0.065, 18, 14), hairM); bun.position.set(-0.13, 1.71, 0); g.add(bun); }
+  if (!pants || u.female) { const bun = new THREE.Mesh(sph(0.065, 18, 14), hairM); bun.position.set(-0.13, 1.71, 0); g.add(bun); }
   if (u.hat) {
     const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.098, 0.112, 0.085, 28), cloth(u.jacket)); hat.position.set(0.02, 1.91, 0); hat.rotation.z = -0.12; g.add(hat);
     const band = new THREE.Mesh(new THREE.CylinderGeometry(0.114, 0.114, 0.022, 28), cloth(u.scarf)); band.position.set(0.02, 1.885, 0); band.rotation.z = -0.12; g.add(band);
@@ -596,6 +600,7 @@ export function makeCart(accent, airline) {
   });
   for (let i = 0; i < 3; i++) { const st = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.028, 0.16, 16), cupM); st.position.set(0.12 + i * 0.075, 1.15, 0.07); g.add(st); }
   for (let i = 0; i < 4; i++) { const can = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.11, 16), new THREE.MeshStandardMaterial({ color: i % 2 ? '#2a6e3f' : '#b8352c', metalness: 0.6, roughness: 0.3 })); can.position.set(0.18 + (i % 2) * 0.07, 1.125, -0.06 - Math.floor(i / 2) * 0.0); g.add(can); }
+  g.userData.items = g.children.filter((o) => o.position.y > 1.08);
   g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   return g;
 }
@@ -613,3 +618,43 @@ export function makeMealTray(drinkCol) {
   const fork = new THREE.Mesh(new RoundedBoxGeometry(0.012, 0.004, 0.15, 1, 0.002), m.chrome); fork.position.set(-0.11, 0.012, -0.05); g.add(fork);
   return g;
 }
+
+// ---------- 登機箱（拉桿、輪子） ----------
+export function makeSuitcase(color) {
+  const g = new THREE.Group();
+  const m = materials();
+  const body = new THREE.Mesh(new RoundedBoxGeometry(0.36, 0.5, 0.23, 3, 0.04), new THREE.MeshPhysicalMaterial({ color, roughness: 0.35, clearcoat: 0.4 }));
+  body.position.y = 0.29; g.add(body);
+  for (let k = -1; k <= 1; k++) { const rib = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.48, 0.235), new THREE.MeshStandardMaterial({ color: shadeHex(color, 0.8) })); rib.position.set(k * 0.09, 0.29, 0); g.add(rib); }
+  for (const z of [-0.07, 0.07]) {
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.42, 8), m.chrome); rod.position.set(-0.14, 0.75, z); g.add(rod);
+    const wh = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.025, 14), m.rubber); wh.rotation.x = Math.PI / 2; wh.position.set(-0.14, 0.03, z * 1.3); g.add(wh);
+  }
+  const grip = new THREE.Mesh(new RoundedBoxGeometry(0.03, 0.03, 0.18, 2, 0.01), m.shellDark); grip.position.set(-0.14, 0.96, 0); g.add(grip);
+  g.userData.handle = [grip];
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+// 櫃內行李（無拉桿，平放）
+export function makeBinBag(color, seed = 0) {
+  const g = new THREE.Group();
+  const soft = seed % 3 === 2;
+  const body = new THREE.Mesh(soft ? new RoundedBoxGeometry(0.4, 0.22, 0.48, 4, 0.08) : new RoundedBoxGeometry(0.34, 0.23, 0.5, 3, 0.035),
+    new THREE.MeshPhysicalMaterial({ color, roughness: soft ? 0.85 : 0.35, clearcoat: soft ? 0 : 0.4 }));
+  g.add(body);
+  const handle = new THREE.Mesh(new RoundedBoxGeometry(0.12, 0.025, 0.03, 2, 0.01), materials().shellDark); handle.position.set(0, 0.125, 0); g.add(handle);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+// 登機中的旅客（站姿、可走路動畫），與坐姿模型使用相同配色
+export function makePaxWalker(p) {
+  const h = hash(p.seat + p.name);
+  const shirt = SHIRTS[h % SHIRTS.length], pants = PANTS[(h >>> 4) % PANTS.length];
+  let skin = SKINS[(h >>> 8) % SKINS.length], hair = HAIRS[(h >>> 12) % HAIRS.length];
+  if (p.type === 'elder') hair = '#c9c6bf';
+  const style = (h >>> 16) % 4;
+  const g = makeCrew({ jacket: shirt, bottom: pants, shirt, scarf: shirt, hat: false, bottomType: 'pants', hair, skin, civilian: true, female: style === 1 || style === 2 });
+  if (p.type === 'child') g.scale.setScalar(0.7);
+  return g;
+}
+export const BAG_COLORS = ['#25282e', '#3a2c22', '#2b3c55', '#6b6f78', '#7a2f35', '#1f3a33', '#8a6d4b', '#4b3a5c'];

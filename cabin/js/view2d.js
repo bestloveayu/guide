@@ -274,7 +274,8 @@ export class View2D {
       }
       if (this.selSeats.has(s.id)) { ctx.strokeStyle = '#f2b45a'; ctx.lineWidth = 2.5; roundRect(ctx, sx - 2, sy - 2, w + 4, h + 4, 5); ctx.stroke(); }
       const p = paxBySeat[s.id];
-      if (p && !s.removed) this.drawPassenger(s, p, sim);
+      if (p && !s.removed && (!sim || !sim.isSeated || sim.isSeated(s.id))) this.drawPassenger(s, p, sim);
+      if (sim && sim.calls && sim.calls[s.id]) { const [cx, cy] = this.w2s(s.x, s.y); const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 180); ctx.fillStyle = `rgba(90,167,230,${0.25 + 0.35 * pulse})`; ctx.beginPath(); ctx.arc(cx, cy, Math.max(10, S * 0.55), 0, Math.PI * 2); ctx.fill(); ctx.font = `${Math.max(12, S * 0.32)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🔔', cx, cy - Math.max(14, S * 0.6)); }
       const at = activeTargets.get(s.id);
       if (at) {
         const [cx, cy] = this.w2s(s.x, s.y);
@@ -337,6 +338,13 @@ export class View2D {
         const last = pl.path[pl.path.length - 1]; const [lx, ly] = this.w2s(last.x, last.y);
         ctx.fillStyle = '#f2b45a'; ctx.beginPath(); ctx.arc(lx, ly, 4, 0, Math.PI * 2); ctx.fill();
       }
+      if (sim.boarding) for (const [seat, b] of Object.entries(sim.boarding)) {
+        if (!['walk', 'stow', 'sit'].includes(b.state)) continue;
+        const [bx, by] = this.w2s(b.x, b.y), rr = Math.max(4, S * 0.18);
+        ctx.fillStyle = '#9fb7d3'; ctx.beginPath(); ctx.arc(bx, by, rr, 0, Math.PI * 2); ctx.fill();
+        if (b.bag && b.state === 'walk') { const [qx, qy] = this.w2s(b.x - Math.cos(b.heading) * 0.42, b.y - Math.sin(b.heading) * 0.42); ctx.fillStyle = b.col; ctx.fillRect(qx - rr * 0.6, qy - rr * 0.6, rr * 1.2, rr * 1.2); }
+      }
+      (sim.spills || []).forEach((sp) => { const [qx, qy] = this.w2s(sp.x, sp.y); ctx.fillStyle = 'rgba(120,70,30,0.7)'; ctx.beginPath(); ctx.arc(qx, qy, Math.max(5, S * 0.2), 0, Math.PI * 2); ctx.fill(); });
       sim.npcs.forEach((n) => this.drawPerson(n.x, n.y, n.heading, n.color, n.name.replace(/^(學姊|座艙長)\s*/, '').slice(0, 4)));
       const uni = this.app.state.profile.uniform;
       this.drawPerson(pl.x, pl.y, pl.heading, uni.jacket, '我', uni.scarf, true);

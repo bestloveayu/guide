@@ -200,3 +200,5 @@ details summary { cursor: pointer; color: var(--muted); }
 .choice button { padding: 6px 12px; border-radius: 999px; font-size: 13px; }
 .choice button small { color: var(--muted); }
 .choice button.on { background: #3a2c14; border-color: var(--accent); color: var(--accent); }
+
+#envBox .sign.call { background: #1d4f86; color: #cfe6ff; font-weight: 600; animation: pulse 1s infinite; }

@@ -12,8 +12,8 @@ import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUnifo
 import { Reflector } from 'three/addons/objects/Reflector.js';
 RectAreaLightUniformsLib.init();
 import { PAX_TYPES, PRIORITY } from './data.js';
-import { activeSeats, binDoors, roomLayout, LAV, lavLayout } from './layout.js';
-import { M, materials, textures, seatAsset, passengerGeometry, PAX_MAT, makeCrew as buildCrew, makeCart, makeMealTray } from './art.js';
+import { activeSeats, binDoors, roomLayout, LAV, lavLayout, bagPose, binCapacity } from './layout.js';
+import { M, materials, textures, seatAsset, passengerGeometry, PAX_MAT, makeCrew as buildCrew, makeCart, makeMealTray, makeSuitcase, makeBinBag, makePaxWalker } from './art.js';
 
 export const makeCrew = buildCrew;
 const P = (x, y, h = 0) => new THREE.Vector3(x, h, -y); // 模擬座標 → three
@@ -283,6 +283,7 @@ export class View3D {
     this.cockpitPanel = null;
     this.mirrors = [];
     this.serveAnim = null; this.serveQueue = [];
+    this.bagMeshes = new Map(); this.walkers = new Map(); this.callMarks = new Map(); this.spillMeshes = new Map(); this.binBlend = 0;
     const m = materials();
     const L = ac.length, W = ac.width, R = W / 2;
     const uni = prof.uniform;
@@ -362,7 +363,7 @@ export class View3D {
       const hz = s * (ix + 0.24), hy = 2.08;
       const bagCols = ['#2a2d33', '#5b3b2a', '#30445e', '#6b6f78', '#7a2f35', '#1f3a33'];
       const bagMats = bagCols.map((c) => this.clipped(new THREE.MeshStandardMaterial({ color: c, roughness: 0.6 })));
-      bd.doors.filter((d) => d.side === s).forEach((d, k) => {
+      bd.doors.filter((d) => d.side === -s).forEach((d, k) => { // d.side 為模擬座標（左舷負），three 的 z 方向相反
         const pivot = new THREE.Group(); pivot.position.set(0, hy, hz);
         const dg = sweep(doorProfile, d.x0 + 0.004, d.x1 - 0.004, s); dg.translate(0, -hy, -hz);
         const dm = new THREE.Mesh(dg, bin); dm.userData.propId = d.id;
@@ -370,14 +371,6 @@ export class View3D {
         pivot.add(dm, handle); pivot.userData.ceiling = true;
         this.cabin.add(pivot); this.propMeshes.push(dm, handle);
         this.pivots.set(d.id, { pivot, axis: 'x', base: 0, dir: s, max: 1.25, cur: 0 });
-        // 櫃內行李
-        const n = 1 + ((k * 7 + (s > 0 ? 3 : 0)) % 3);
-        for (let j = 0; j < n; j++) {
-          const bw = 0.36 + ((k + j) % 3) * 0.06;
-          const bag = new THREE.Mesh(new RoundedBoxGeometry(bw, 0.24, 0.42, 2, 0.03), bagMats[(k * 3 + j + (s > 0 ? 2 : 0)) % bagMats.length]);
-          bag.position.set(d.x0 + 0.12 + bw / 2 + j * (bw + 0.05), 1.77, s * (R - 0.48)); bag.userData.ceiling = true;
-          if (bag.position.x + bw / 2 < d.x1 - 0.05) this.cabin.add(bag);
-        }
       });
       const seams = new THREE.InstancedMesh(new THREE.BoxGeometry(0.006, 0.34, 0.012), seamMat, bd.doors.length);
       bd.doors.forEach((d, k) => seams.setMatrixAt(k, M(d.x0, 1.88, s * (ix - 0.012), s > 0 ? 0.1 : -0.1, 0, 0)));
@@ -951,6 +944,148 @@ export class View3D {
     return panel;
   }
 
+  // =================== 動態場景：行李、登機旅客、服務鈴、掉落物、行李櫃視角 ===================
+  updateDynamic(sim, walker, t, dt) {
+    const ac = this.app.aircraft();
+    const R = ac.width / 2;
+    const k = 1 - Math.exp(-dt * 7);
+    const fp = this.mode === 'fp';
+    // --- 行李櫃內的行李 ---
+    if (sim && sim.binBags) {
+      for (const [doorId, bags] of Object.entries(sim.binBags)) {
+        const d = sim.binDoor(doorId); if (!d) continue;
+        bags.forEach((bag, i) => {
+          const key = doorId + '#' + i;
+          let mesh = this.bagMeshes.get(key);
+          const pose = bagPose(d, i, bag.tidy, ac.width);
+          if (!mesh) {
+            mesh = makeBinBag(bag.col, bag.seed || i);
+            mesh.traverse((o) => { if (o.isMesh) { o.userData.propId = `bag|${doorId}|${i}`; this.propMeshes.push(o); } });
+            const st = bag.spawn ? P(bag.spawn.x, bag.spawn.y, 1.5) : P(pose.x, pose.y, pose.h);
+            mesh.position.copy(st);
+            this.cabin.add(mesh); this.bagMeshes.set(key, mesh);
+          }
+          mesh.visible = fp || !!sim.binView;
+          const tp = P(pose.x, pose.y, pose.h);
+          mesh.position.lerp(tp, k);
+          mesh.rotation.y += (pose.yaw - mesh.rotation.y) * k;
+          mesh.rotation.x += (-pose.roll - mesh.rotation.x) * k;
+        });
+      }
+    }
+    // --- 登機中的旅客 ---
+    if (sim && sim.boarding) {
+      for (const [seat, b] of Object.entries(sim.boarding)) {
+        const seated = this.paxMeshes.get(seat);
+        if (seated) seated.visible = b.state === 'seated';
+        let w = this.walkers.get(seat);
+        const active = b.state === 'walk' || b.state === 'stow' || b.state === 'sit';
+        if (!active) { if (w) { this.cabin.remove(w.mesh); if (w.bag) this.cabin.remove(w.bag); this.walkers.delete(seat); } continue; }
+        if (!w) {
+          const p = this.app.scenario().passengers.find((x) => x.seat === seat) || { seat, name: '', type: 'normal' };
+          w = { mesh: makePaxWalker(p), bag: b.bag ? makeSuitcase(b.col) : null, last: { x: b.x, y: b.y } };
+          this.cabin.add(w.mesh); if (w.bag) this.cabin.add(w.bag);
+          this.walkers.set(seat, w);
+        }
+        const moving = Math.hypot(b.x - w.last.x, b.y - w.last.y) > 0.0008; w.last = { x: b.x, y: b.y };
+        w.mesh.position.copy(P(b.x, b.y, 0));
+        let dh = b.heading - w.mesh.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); w.mesh.rotation.y += dh * Math.min(1, dt * 8);
+        const stowK = b.state === 'stow' ? Math.min(1, b.stowT / 1.6) : 0;
+        w.mesh.userData.setReach(b.state === 'stow' ? Math.sin(Math.min(1, stowK * 1.3) * Math.PI / 2) : 0);
+        w.mesh.userData.animate(t, moving, false, dt);
+        if (w.bag) {
+          if (b.state === 'walk') {
+            // 拉在身後、略微傾斜
+            const hx = Math.cos(b.heading), hy = Math.sin(b.heading);
+            w.bag.position.copy(P(b.x - hx * 0.42, b.y - hy * 0.42, 0)); w.bag.rotation.set(0, b.heading, 0.32);
+          } else if (b.state === 'stow') {
+            const d = sim.binDoor(b.door);
+            const n = (sim.binBags[b.door] || []).length;
+            const pose = d ? bagPose(d, Math.min(n, binCapacity(d) - 1), true, ac.width) : { x: b.x, y: b.y, h: 1.8 };
+            const lift = Math.min(1, stowK * 1.4);
+            const from = P(b.x, b.y, 0.6), to = P(pose.x, pose.y, pose.h - 0.25);
+            w.bag.position.lerpVectors(from, to, lift * lift * (3 - 2 * lift));
+            w.bag.rotation.set(0, b.heading, lift * Math.PI / 2 * 0.95);
+            w.bag.visible = stowK < 0.98;
+          } else w.bag.visible = false;
+        }
+      }
+    }
+    // --- 服務鈴：座位上方的呼叫燈 + 座位亮起 ---
+    if (sim && sim.calls) {
+      for (const seat of Object.keys(sim.calls)) {
+        if (this.callMarks.has(seat)) continue;
+        const st = ac.seats.find((z) => z.id === seat); if (!st) continue;
+        const g = new THREE.Group();
+        const side = st.y < 0 ? -1 : 1;
+        const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.012, 18), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 1.4, 3.2), toneMapped: false }));
+        lamp.position.copy(P(st.x + 0.13, side * (R - 0.46), 1.608));
+        const halo = new THREE.Mesh(new THREE.CircleGeometry(0.11, 24), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.4, 0.9, 2.2), toneMapped: false, transparent: true, opacity: 0.35, depthWrite: false }));
+        halo.rotation.x = Math.PI / 2; halo.position.copy(lamp.position).add(new THREE.Vector3(0, -0.008, 0));
+        // 座位輪廓發光
+        const glow = new THREE.Mesh(new THREE.BoxGeometry(st.d + 0.1, 1.3, st.w + 0.06), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.35, 0.75, 1.8), toneMapped: false, transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending }));
+        glow.position.copy(P(st.x, st.y, 0.7));
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.022, 8, 40), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 1.4, 3.2), toneMapped: false }));
+        ring.rotation.x = Math.PI / 2; ring.position.copy(P(st.x, st.y, 0.03));
+        const beacon = this.label('🔔 ' + seat, P(st.x, st.y, 1.75), 0.75); beacon.material.depthTest = true;
+        g.add(lamp, halo, glow, ring, beacon);
+        this.cabin.add(g); this.callMarks.set(seat, g);
+      }
+      for (const [seat, g] of this.callMarks) {
+        if (!sim.calls[seat]) { this.cabin.remove(g); this.callMarks.delete(seat); continue; }
+        const pulse = 0.5 + 0.5 * Math.sin(t * 5);
+        g.children[1].material.opacity = 0.3 + 0.4 * pulse; g.children[2].material.opacity = 0.18 + 0.22 * pulse;
+      }
+    }
+    // --- 推車奔跑：物品掉落 ---
+    if (sim && this.cart && this.cart.userData.items) {
+      const items = this.cart.userData.items;
+      const lost = Math.min(items.length, sim.cart.lost || 0);
+      if (!lost && this.spillMeshes.size === 0) items.forEach((o) => { o.visible = true; });
+      for (const sp of sim.spills || []) {
+        if (this.spillMeshes.has(sp.id)) continue;
+        const g = new THREE.Group(); const falls = [];
+        items.filter((o) => o.visible).slice(0, sp.n).forEach((o, i) => {
+          o.visible = false;
+          const c = o.clone(); const wp = new THREE.Vector3(); o.getWorldPosition(wp); this.cabin.worldToLocal(wp);
+          c.position.copy(wp); g.add(c);
+          const dest = P(sp.x + (i - 1) * 0.12, sp.y + (Math.random() - 0.5) * 0.2, 0.04);
+          falls.push({ m: c, from: wp.clone(), to: dest, spin: (Math.random() - 0.5) * 8 });
+        });
+        const puddle = new THREE.Mesh(new THREE.CircleGeometry(0.22, 28), new THREE.MeshStandardMaterial({ color: '#5a3416', roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.75 }));
+        puddle.rotation.x = -Math.PI / 2; puddle.position.copy(P(sp.x, sp.y, 0.008)); puddle.scale.setScalar(0.01); g.add(puddle);
+        this.cabin.add(g); this.spillMeshes.set(sp.id, { g, falls, t0: t, puddle });
+      }
+      for (const [id, s] of this.spillMeshes) {
+        if (!(sim.spills || []).some((x) => x.id === id)) { this.cabin.remove(s.g); this.spillMeshes.delete(id); continue; }
+        const e = Math.min(1, (t - s.t0) / 0.7);
+        s.falls.forEach((f) => { f.m.position.lerpVectors(f.from, f.to, e); f.m.position.y = f.from.y + (f.to.y - f.from.y) * e * e; f.m.rotation.z = e * Math.PI / 2; f.m.rotation.y = f.spin * e; });
+        s.puddle.scale.setScalar(Math.max(0.01, Math.min(1, (t - s.t0 - 0.4) / 0.8)));
+      }
+    }
+    // --- 整理行李時伸手 ---
+    if (sim && sim.tidyEvents && sim.tidyEvents.length) { sim.tidyEvents.length = 0; this.tidyT = t; }
+  }
+
+  // 行李櫃視角：鏡頭移到走道上，抬頭看著打開的行李櫃
+  binCamera(sim, dt) {
+    const want = sim && sim.binView ? 1 : 0;
+    this.binBlend = (this.binBlend || 0) + (want - (this.binBlend || 0)) * Math.min(1, dt * 4);
+    if (this.binBlend < 0.002) return;
+    const d = sim && sim.binView ? sim.binDoor(sim.binView) : this.lastBinDoor;
+    if (!d) return;
+    this.lastBinDoor = d;
+    const R = this.app.aircraft().width / 2, inner = R - 0.74;
+    const pos = P(d.x - 0.15, d.side * Math.max(-0.1, inner - 0.6), 1.62);
+    const look = P(d.x, d.side * (R - 0.5), 1.82);
+    this.cabin.updateMatrixWorld(true);
+    const wp = pos.clone().applyMatrix4(this.cabin.matrixWorld), wl = look.clone().applyMatrix4(this.cabin.matrixWorld);
+    const tmp = this.tmpCam || (this.tmpCam = new THREE.PerspectiveCamera()); tmp.position.copy(wp); tmp.lookAt(wl);
+    this.camera.position.lerp(wp, this.binBlend);
+    this.camera.quaternion.slerp(tmp.quaternion, this.binBlend);
+    this.camera.fov += (60 - this.camera.fov) * this.binBlend;
+  }
+
   // ---- 送餐動作：轉向旅客、伸手把餐盤遞到桌板上 ----
   updateServe(sim, walker, t) {
     if (!sim) return;
@@ -1016,6 +1151,7 @@ export class View3D {
 
   applyMode() {
     const fp = this.mode === 'fp';
+    this.showBinsState = fp;
     this.clipMats.forEach((mm) => { mm.clippingPlanes = fp ? [] : [this.clipWorld]; mm.needsUpdate = true; });
     this.cabin.traverse((o) => {
       if (o.userData.ceiling) o.visible = fp;
@@ -1222,6 +1358,9 @@ export class View3D {
 
     this.drawWindow(env);
 
+    this.updateDynamic(sim, walker, t, dt);
+    const showBins = this.mode === 'fp' || !!(sim && sim.binView);
+    if (this.showBinsState !== showBins) { this.showBinsState = showBins; this.cabin.traverse((o) => { if (o.userData.ceiling) o.visible = showBins; }); this.clipMats.forEach((mm) => { mm.clippingPlanes = showBins ? [] : [this.clipWorld]; mm.needsUpdate = true; }); }
     // 可開關物件動畫（行李櫃、洗手間門、休息室門、駕駛艙門）
     if (this.pivots) this.pivots.forEach((pv, id) => {
       const target = sim ? ((sim.binOpen && sim.binOpen[id]) || (sim.doorOpen && sim.doorOpen[id]) ? 1 : 0) : 0;
@@ -1291,6 +1430,7 @@ export class View3D {
         this.player.rotation.y += this.mode === 'fp' && !walker.seated && !serving ? d : d * Math.min(1, dt * 10);
       }
       this.updateServe(sim, walker, t);
+      if (this.tidyT && t - this.tidyT < 0.8) this.player.userData.setReach(Math.sin(((t - this.tidyT) / 0.8) * Math.PI));
       this.player.userData.animate(t, moving, walker.seated, dt);
       if (this.player.userData.setHarness) this.player.userData.setHarness(!!(walker.seated && walker.belted));
     } else if (this.player) this.player.visible = false;
@@ -1347,6 +1487,30 @@ export class View3D {
       this.camera.position.set(o.target.x + o.dist * Math.cos(o.pitch) * Math.cos(o.yaw), o.target.y + o.dist * Math.sin(o.pitch), o.target.z + o.dist * Math.cos(o.pitch) * Math.sin(o.yaw));
       this.camera.lookAt(o.target);
       this.camera.fov = 45; this.camera.near = 0.1;
+    }
+    this.binCamera(sim, dt);
+    // 行李櫃視角：隱藏自己的身體，只在整理時顯示伸出的雙手
+    if (this.player) {
+      const inBin = (this.binBlend || 0) > 0.3;
+      if (inBin) {
+        this.player.visible = false;
+        if (!this.binHands) {
+          this.binHands = new THREE.Group();
+          const u = this.app.state.profile.uniform;
+          const sleeve = new THREE.MeshStandardMaterial({ color: u.jacket, roughness: 0.8 }), skin = new THREE.MeshStandardMaterial({ color: u.skin, roughness: 0.6 });
+          for (const z of [-0.14, 0.14]) {
+            const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.34, 6, 12), sleeve); arm.rotation.z = Math.PI / 2 - 0.5; arm.position.set(-0.12, -0.06, z);
+            const hand = new THREE.Mesh(new THREE.SphereGeometry(0.045, 14, 10), skin); hand.scale.set(1.3, 0.7, 1); hand.position.set(0.06, 0.05, z);
+            this.binHands.add(arm, hand);
+          }
+          this.scene.add(this.binHands);
+        }
+        const r = this.tidyT && t - this.tidyT < 0.8 ? Math.sin(((t - this.tidyT) / 0.8) * Math.PI) : 0;
+        this.binHands.visible = r > 0.02;
+        const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+        this.binHands.position.copy(this.camera.position).addScaledVector(fwd, 0.35 + 0.25 * r).add(new THREE.Vector3(0, -0.22 + 0.12 * r, 0));
+        this.binHands.quaternion.copy(this.camera.quaternion); this.binHands.rotateY(Math.PI / 2);
+      } else if (this.binHands) this.binHands.visible = false;
     }
     this.camera.updateProjectionMatrix();
     this.applyEnvIntensity();

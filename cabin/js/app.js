@@ -86,6 +86,7 @@ class App {
       if (this.sim && !this.sim.ended) {
         if (e.code === 'KeyE' && !this.sim.modalOpen) { const a = this.sim.availableActions()[0]; if (a) a.run(); }
         if (e.code === 'KeyP') this.togglePause();
+        if (e.code === 'Escape' && this.sim.binView) this.sim.exitBinView();
         if (this.sim.modalOpen && /^Digit[1-9]$/.test(e.code)) { const b = document.querySelectorAll('.opt')[+e.code.slice(5) - 1]; if (b) b.click(); }
       }
       if (this.mode === 'edit' && this.view === '2d' && (e.code === 'Delete' || e.code === 'Backspace')) this.removeSelectedSeats();
@@ -143,6 +144,8 @@ class App {
     if (sim && !sim.ended) {
       const mv = this.v3.fpMove(dt);
       if (mv) sim.moveManual(mv.dx, mv.dy);
+      // 推著餐車按住 Shift 加速 → 物品掉落
+      sim.cartRush(dt, !!mv && !!(this.v3.keys.ShiftLeft || this.v3.keys.ShiftRight) && sim.cart && sim.cart.state === 'out');
       sim.update(dt);
       // 點選旅客後自動走過去，抵達時開始互動
       const pt = this.pendingTask;
@@ -649,6 +652,8 @@ class App {
         onChat: (seat, info) => this.showChat(seat, info),
         onCockpit: () => this.showCockpit(),
         onService: (info) => this.showService(info),
+        onCallBell: (seat) => { this.chime(); this.toast('服務鈴', `${seat} 旅客按了服務鈴。`, 'warn'); this.logLine('服務鈴', `${seat} 旅客按了服務鈴`); },
+        onArrest: () => { this.closeModal(); if (this.view === 'fp' && this.sim) { const ck = this.aircraft().fixtures.find((f) => f.type === 'cockpit'); if (ck) { const yaw = Math.atan2(0 - this.sim.player.y, ck.x + ck.w / 2 + 1 - this.sim.player.x); this.v3.fp.yaw = yaw; this.v3.fp.pitch = 0; } } },
         onEnd: (r) => this.endFlight(r),
         onTaskChange: () => { this.taskListDirty = true; },
         onPhase: () => { this.taskListDirty = true; },
@@ -665,6 +670,21 @@ class App {
   }
 
   say(sp, tx) { this.toast(sp, tx); this.logLine(sp, tx); }
+
+  // 服務鈴「叮—咚」
+  chime() {
+    try {
+      const A = window.AudioContext || window.webkitAudioContext; if (!A) return;
+      this.audio = this.audio || new A();
+      const ctx = this.audio, now = ctx.currentTime;
+      [[1046, 0], [784, 0.32]].forEach(([f, d]) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = 'sine'; o.frequency.value = f; o.connect(g); g.connect(ctx.destination);
+        g.gain.setValueAtTime(0.0001, now + d); g.gain.exponentialRampToValueAtTime(0.25, now + d + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, now + d + 0.9);
+        o.start(now + d); o.stop(now + d + 1);
+      });
+    } catch (e) { /* 沒有音效也沒關係 */ }
+  }
 
   async exitPlay() {
     if (this.sim && !this.sim.ended && !await this.ask('離開模擬將放棄本次航班，確定？')) return;
@@ -726,6 +746,7 @@ class App {
     this.openModal(h('div', {},
       h('h2', {}, `${t.icon} ${p.name || '旅客'}（${seat}）`),
       h('div', { class: 'muted' }, [t.name, p.note].filter(Boolean).join('・')),
+      info.call ? h('div', { class: 'card', style: 'border-color:#5aa7e6;margin:6px 0' }, `🔔 服務鈴：旅客${info.call}`) : null,
       bar('滿意度', info.mood, mcol(info.mood)), bar('耐心', info.patience, mcol(info.patience)),
       h('div', { class: 'muted', style: 'margin-top:8px' }, `你要對旅客說什麼？（${sim.phase.name}階段・安全帶燈${sim.env.seatbelt ? '亮' : '熄'}）`),
       optsBox, result,
@@ -832,7 +853,7 @@ class App {
     const e = sim.env;
     const ins = (label, val, unit) => `<div class="ins">${label}<b>${val}</b><small>${unit}</small></div>`;
     $('#envBox').innerHTML = ins('高度 ALT', Math.round(e.alt).toLocaleString(), 'ft') + ins('空速 IAS', Math.max(0, Math.round(e.speed)), 'kt') + ins('航班時間', fmtT(sim.totalT), sim.paused ? '暫停中' : `×${sim.timeScale}`)
-      + `<div class="chips"><span class="sign ${e.seatbelt ? 'on' : ''}">繫緊安全帶</span><span class="sign ${e.doorsOpen ? '' : 'good'}">${e.doorsOpen ? '艙門開啟' : '艙門關閉'}</span>`
+      + `<div class="chips">${Object.keys(sim.calls || {}).map((st) => `<span class="sign call">🔔 ${st}</span>`).join('')}<span class="sign ${e.seatbelt ? 'on' : ''}">繫緊安全帶</span><span class="sign ${e.doorsOpen ? '' : 'good'}">${e.doorsOpen ? '艙門開啟' : '艙門關閉'}</span>`
       + `${e.turbulence > 0 ? '<span class="sign bad">亂流</span>' : ''}${sim.player.seated ? '<span class="sign good">已就座</span>' : ''}</div>`;
     // 互動按鈕
     const ib = $('#interactBox');

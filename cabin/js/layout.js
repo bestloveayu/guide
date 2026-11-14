@@ -420,3 +420,15 @@ export function approachPoint(ac, grid, target) {
   }
   return best || { x: target.x, y: 0 };
 }
+
+// ---- 行李櫃內的行李槽位（模擬與 3D 共用）----
+export function binCapacity(door) { return Math.max(1, Math.floor((door.x1 - door.x0 - 0.12) / 0.42)); }
+// 回傳行李在模擬座標中的位置與姿態：tidy = 推到底擺正；否則斜放並突出櫃外
+export function bagPose(door, idx, tidy, W) {
+  const cap = binCapacity(door), slotW = (door.x1 - door.x0 - 0.12) / cap;
+  const R = W / 2;
+  const x = door.x0 + 0.06 + (idx + 0.5) * slotW;
+  if (tidy) return { x, y: door.side * (R - 0.45), h: 1.77, yaw: 0, roll: 0 };
+  const k = idx % 2 ? 1 : -1;
+  return { x: x + k * 0.04, y: door.side * (R - 0.66), h: 1.81, yaw: 0.5 * k, roll: 0.22 * door.side };
+}
