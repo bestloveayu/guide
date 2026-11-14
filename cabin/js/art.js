@@ -497,11 +497,11 @@ export function makeCrew(u) {
   torso.position.y = 0.96; torso.scale.set(0.78, 1, 1.05); g.add(torso);
   if (!u.civilian) {
   const shirt = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.2, 3, 1, true), mat(u.shirt, { side: THREE.DoubleSide }));
-  shirt.position.set(0.135, 1.45, 0); shirt.rotation.set(0, Math.PI / 2, Math.PI); shirt.scale.set(1, 1, 0.4); g.add(shirt);
+  shirt.position.set(0.135, 1.45, 0); shirt.rotation.set(0, Math.PI / 2, Math.PI); shirt.scale.set(1, 1, 0.4); shirt.userData.fpHide = true; g.add(shirt);
   for (const y of [1.22, 1.1]) { const b = new THREE.Mesh(sph(0.014, 10, 8), gold); b.position.set(0.145, y, 0); g.add(b); }
   const wing = new THREE.Mesh(new RoundedBoxGeometry(0.012, 0.022, 0.1, 2, 0.005), gold); wing.position.set(0.15, 1.42, -0.09); g.add(wing);
-  const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.068, 0.026, 10, 20), cloth(u.scarf)); scarf.rotation.x = Math.PI / 2; scarf.position.y = 1.535; g.add(scarf);
-  for (const s of [-1, 1]) { const bow = new THREE.Mesh(sph(0.045, 12, 8), cloth(u.scarf)); bow.position.set(0.09, 1.5, s * 0.045); bow.scale.set(0.5, 0.8, 1.2); bow.rotation.x = s * 0.6; g.add(bow); }
+  const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.068, 0.026, 10, 20), cloth(u.scarf)); scarf.rotation.x = Math.PI / 2; scarf.position.y = 1.535; scarf.userData.fpHide = true; g.add(scarf);
+  for (const s of [-1, 1]) { const bow = new THREE.Mesh(sph(0.045, 12, 8), cloth(u.scarf)); bow.position.set(0.09, 1.5, s * 0.045); bow.scale.set(0.5, 0.8, 1.2); bow.rotation.x = s * 0.6; bow.userData.fpHide = true; g.add(bow); }
   } else {
     const collar = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.02, 8, 18), cloth(shadeHex(u.jacket, 1.1))); collar.rotation.x = Math.PI / 2; collar.position.y = 1.53; g.add(collar);
   }
@@ -551,7 +551,7 @@ export function makeCrew(u) {
   }
   g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   // 頭部相關零件（第一人稱時隱藏，避免鏡頭看到頭部內側）
-  g.children.forEach((o) => { if (o.position.y > 1.56) o.userData.headPart = true; });
+  g.children.forEach((o) => { if (o.position.y > 1.56 || o.userData.fpHide) o.userData.headPart = true; });
   g.userData.setHead = (v) => g.children.forEach((o) => { if (o.userData.headPart) o.visible = v; });
   let blend = 0, reach = 0;
   g.userData.setReach = (k) => { reach = k; };

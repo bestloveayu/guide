@@ -243,6 +243,7 @@ export function defaultTasks() {
     },
     { id: 'T10', title: '向機長報告客艙準備完成', kind: 'goto', phase: 'taxi', at: 20, priority: 1, limit: 30, target: { fixture: '駕駛艙' }, xp: 30, minRank: 3, desc: '確認所有組員回報後，通知駕駛艙客艙已準備好起飛。' },
     // 起飛
+    { id: 'T27', title: '關上所有行李櫃', kind: 'bins', phase: 'pushback', at: 0, priority: 1, limit: 85, xp: 25, minRank: 0, desc: '起飛前巡視客艙，把仍開著的行李櫃整理好並關上（突出的行李要先推到底）。其他組員也會一起幫忙。' },
     { id: 'T11', title: '回到組員座椅就座', kind: 'seated', phase: 'takeoff', at: 0, priority: 1, limit: 20, target: { fixture: 'jumpseat' }, xp: 20, minRank: 0, desc: '起飛時必須坐在組員座椅並繫好安全帶與肩帶，進行「靜默檢查」(30 秒複習)。起飛中不可解開安全帶、站起或開啟行李櫃。' },
     // 巡航
     { id: 'T12', title: '推出餐車', kind: 'cart', phase: 'cruise', at: 0, priority: 3, limit: 60, target: { fixture: 'galley' }, xp: 15, minRank: 0, desc: '到廚房確認餐點與飲料數量、特殊餐名單，打開煞車後推出餐車。' },
@@ -358,4 +359,4 @@ export const DRINKS = [
   { id: 'water', name: '礦泉水' }, { id: 'oj', name: '柳橙汁' }, { id: 'apple', name: '蘋果汁' }, { id: 'coke', name: '可樂' },
   { id: 'coffee', name: '熱咖啡', hot: true }, { id: 'tea', name: '熱茶', hot: true }, { id: 'beer', name: '啤酒', alcohol: true }, { id: 'wine', name: '紅酒', alcohol: true },
 ];
-export const SCENARIO_VERSION = 2;
+export const SCENARIO_VERSION = 3;

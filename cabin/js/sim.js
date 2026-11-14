@@ -39,8 +39,8 @@ export class Flight {
       this.npcs = DEFAULT_CREW.map((c, i) => ({ ...c, x: gp.x + 0.4 * i, y: gp.y, home: { x: gp.x + 0.4 * i, y: gp.y }, path: [], task: null, work: 0 }));
     } else {
       this.npcs = [
-        { id: 'senior', name: scenario.npc.senior, color: '#d97a8c', x: gp.x + 0.5, y: gp.y, path: [], task: null },
-        { id: 'purser', name: scenario.npc.purser, color: '#c9a227', x: walkable(this.grid, start.x - 0.7, start.y) ? start.x - 0.7 : start.x, y: start.y, heading: 0, path: [], task: null },
+        { id: 'senior', name: scenario.npc.senior, color: '#d97a8c', x: gp.x + 0.5, y: gp.y, home: { x: gp.x + 0.5, y: gp.y }, path: [], task: null },
+        { id: 'purser', name: scenario.npc.purser, color: '#c9a227', x: walkable(this.grid, start.x - 0.7, start.y) ? start.x - 0.7 : start.x, y: start.y, home: { x: walkable(this.grid, start.x - 0.7, start.y) ? start.x - 0.7 : start.x, y: start.y }, heading: 0, path: [], task: null },
       ];
     }
 
@@ -53,7 +53,7 @@ export class Flight {
     this.initService();
     this.initBins();
     this.initBoarding();
-    this.calls = {}; this.spills = [];
+    this.calls = {}; this.spills = []; this.binJobs = {};
   }
 
   get phase() { return PHASES[this.phaseIdx]; }
@@ -73,7 +73,7 @@ export class Flight {
   }
   inRange(task, who = this.player) {
     const k = task.def.kind;
-    if (k === 'announce' || k === 'manage' || k === 'walk' || k === 'service') return true;
+    if (k === 'announce' || k === 'manage' || k === 'walk' || k === 'service' || k === 'bins') return true;
     const p = this.targetPos(task);
     if (!p) return true; // 找不到目標（例如座位已被移除）就不限制距離
     if (p.seat) return Math.abs(who.x - p.x) <= 0.85 && Math.abs(who.y - p.y) <= 2.6;
@@ -86,11 +86,16 @@ export class Flight {
     return this.tasks.filter((t) => t.status === 'active' || t.status === 'delegated')
       .sort((a, b) => a.def.priority - b.def.priority || a.remaining - b.remaining);
   }
-  interactables() { return this.activeTasks().filter((t) => t.status === 'active' && t.def.kind !== 'walk' && t.def.kind !== 'service' && !(t.def.kind === 'cart' && this.cart.state === 'out') && this.inRange(t)); }
+  interactables() { return this.activeTasks().filter((t) => t.status === 'active' && t.def.kind !== 'walk' && t.def.kind !== 'service' && t.def.kind !== 'bins' && !(t.def.kind === 'cart' && this.cart.state === 'out') && this.inRange(t)); }
 
   // ---- 移動 ----
   goTo(task) {
     if (!task) return;
+    if (task.def.kind === 'bins') {
+      const open = this.binsInfo.doors.filter((d) => this.binOpen[d.id] && !this.binJobs[d.id]).sort((a, c) => Math.abs(a.x - this.player.x) - Math.abs(c.x - this.player.x))[0];
+      if (open) this.walkTo({ x: open.x, y: open.side * 0.15 });
+      return;
+    }
     if (task.def.kind === 'service') {
       if (this.cart.state !== 'out') { const g = this.galleyFixture(); if (g) this.walkTo(approachPoint(this.ac, this.grid, g)); return; }
       const row = this.rows.find((r) => r.seats.some((s) => this.mood[s.id] != null && !this.service.served[s.id]));
@@ -471,6 +476,7 @@ export class Flight {
       else if (this.env.turbulence > 0) this.violation('亂流期間開啟行李櫃', 'bin');
     }
     this.binOpen[b.id] = open;
+    if (!open) { this.stats.binsClosed = (this.stats.binsClosed || 0) + 1; delete this.binJobs[b.id]; }
   }
   // ---- 氧氣面罩 ----
   dropOxygen(row) {
@@ -725,6 +731,7 @@ export class Flight {
   // =================== 行李櫃內行李與整理 ===================
   initBins() {
     this.binBags = {}; this.binVersion = 0; this.binView = null; this.tidyEvents = [];
+    this.binsInfo.doors.forEach((d) => { this.binOpen[d.id] = true; }); // 登機前行李櫃全部打開
     this.stats.tidied = 0;
     let k = 0;
     this.binsInfo.doors.forEach((d) => {
@@ -769,12 +776,22 @@ export class Flight {
     const taskSeats = {};
     this.tasks.forEach((t) => { if (t.def.phase === 'boarding' && t.def.target && t.def.target.seat) taskSeats[t.def.target.seat] = t.def.at || 0; });
     this.boarding = {};
+    // 不規則的登機間隔：有時一群人（同行、家庭）緊接著上，有時隔很久才一位
+    const gaps = order.map(() => { const r = Math.random(); return r < 0.25 ? 0.4 + Math.random() * 0.6 : r < 0.85 ? 1.2 + Math.random() * 2.6 : 4 + Math.random() * 5; });
+    const total = gaps.reduce((a, b) => a + b, 0) || 1;
+    let acc = 3;
     order.forEach((seat, i) => {
       const p = this.sc.passengers.find((x) => x.seat === seat) || {};
-      let t = 4 + (i * 66) / n;
+      acc += (gaps[i] / total) * 66;
+      let t = acc;
       if (taskSeats[seat] != null) t = Math.min(t, Math.max(1, taskSeats[seat] - 16));
       const bagP = p.type === 'child' ? 0 : ['elder', 'mobility'].includes(p.type) ? 0.45 : 0.78;
-      this.boarding[seat] = { state: 'wait', t, x: this.boardStart.x, y: this.boardStart.y, path: [], heading: 0, bag: Math.random() < bagP, col: BAG_COLORS[(i * 3) % BAG_COLORS.length], waitT: 0, said: false };
+      const slow = ['elder', 'mobility'].includes(p.type) ? 0.62 : p.type === 'child' ? 0.85 : 1;
+      this.boarding[seat] = {
+        state: 'wait', t, x: this.boardStart.x, y: this.boardStart.y, path: [], heading: 0, bag: Math.random() < bagP, col: BAG_COLORS[(i * 3 + (Math.random() * 5 | 0)) % BAG_COLORS.length], waitT: 0, said: false,
+        speed: (0.68 + Math.random() * 0.42) * slow, lat: (Math.random() - 0.5) * 0.12, phase: Math.random() * 6,
+        pauseAt: Math.random() < 0.45 ? 0.25 + Math.random() * 0.5 : -1, pauseT: 0, stowDur: 2.2 + Math.random() * 2.8, travelled: 0,
+      };
     });
   }
   isSeated(seat) { return !this.boarding || !this.boarding[seat] || this.phaseIdx > 0 || this.boarding[seat].state === 'seated'; }
@@ -798,6 +815,8 @@ export class Flight {
     for (const [seat, b] of Object.entries(this.boarding)) {
       if (b.state === 'wait') {
         if (this.phaseT < b.t) continue;
+        // 艙門口還有人時先等一下，避免疊在一起
+        if (Object.values(this.boarding).some((o) => o !== b && o.state === 'walk' && Math.hypot(o.x - this.boardStart.x, o.y - this.boardStart.y) < 0.9)) continue;
         const s = findSeat(this.ac, seat);
         b.state = 'walk'; Object.assign(b, this.boardStart);
         b.dest = approachPoint(this.ac, this.grid, s);
@@ -814,8 +833,20 @@ export class Flight {
             continue;
           }
           b.waitT = 0;
+          // 跟在前面停下來（放行李、找座位）的旅客後面排隊
+          const ux = dx / d, uy = dy / d;
+          const blocked = Object.entries(this.boarding).some(([s2, o]) => s2 !== seat && (o.state === 'walk' || o.state === 'stow') && (() => { const ox = o.x - b.x, oy = o.y - b.y, along = ox * ux + oy * uy; return along > 0.05 && along < 0.85 && Math.abs(ox * uy - oy * ux) < 0.35; })());
+          if (blocked) { b.queued = true; continue; }
+          b.queued = false;
         }
-        let move = 0.95 * gdt;
+        // 偶爾停下來看座位號、整理手上的東西
+        if (b.pauseAt > 0 && !b.pauseDone && b.dest && b.travelled > b.pauseAt * Math.hypot(b.dest.x - this.boardStart.x, b.dest.y - this.boardStart.y)) {
+          b.pauseT += gdt; b.paused = true;
+          if (b.pauseT < 1 + (b.phase % 1.5)) continue;
+          b.pauseDone = true; b.paused = false;
+        }
+        let move = (b.speed || 0.9) * gdt * (0.85 + 0.15 * Math.sin(this.totalT * 2.3 + (b.phase || 0)));
+        b.travelled = (b.travelled || 0) + move;
         while (move > 0 && b.path.length) {
           const t = b.path[0], dx = t.x - b.x, dy = t.y - b.y, d = Math.hypot(dx, dy);
           if (d < 1e-3) { b.path.shift(); continue; }
@@ -831,7 +862,7 @@ export class Flight {
         }
       } else if (b.state === 'stow') {
         b.stowT += gdt;
-        if (b.stowT > 1.8) {
+        if (b.stowT > (b.stowDur || 1.8)) {
           const bags = this.binBags[b.door];
           bags.push({ tidy: Math.random() < 0.5, col: b.col, seed: bags.length + seat.length, spawn: { x: b.x, y: b.y } });
           this.binVersion++;
@@ -940,6 +971,11 @@ export class Flight {
         }
         if (t.status === 'active' && t.def.kind === 'seated' && this.player.seated && this.player.belted) this.complete(t, 100, null);
         if (t.status === 'active' && t.def.kind === 'cart' && this.cart.state === 'out') this.complete(t, 100, null);
+        if (t.status === 'active' && t.def.kind === 'bins') {
+          const left = this.binsInfo.doors.filter((d) => this.binOpen[d.id]).length;
+          t.progress = `尚有 ${left} 個未關（你關了 ${this.stats.binsClosed || 0} 個）`;
+          if (!left) { const mine = this.stats.binsClosed || 0, all = this.binsInfo.doors.length; this.complete(t, Math.round(60 + 40 * Math.min(1, mine / Math.max(1, all * 0.4))), '所有行李櫃都已關閉並確認鎖好。'); }
+        }
         if (t.status === 'active' && t.def.kind === 'service' && this.service.total >= this.service.target) {
           const q = Math.round((this.service.correct / Math.max(1, this.service.total)) * 100);
           this.complete(t, q, `餐飲服務完成：送出 ${this.service.total} 份，正確 ${this.service.correct} 份。記得把餐車推回廚房。`);
@@ -948,8 +984,29 @@ export class Flight {
       }
     }
     // 組員 NPC
+    // 其他組員協助關行李櫃（推出、滑行階段）
+    if (['pushback', 'taxi'].includes(this.phase.id)) {
+      for (const c of this.npcs) {
+        if (c.special || c.task) continue;
+        if (c.binJob) {
+          if (!this.binOpen[c.binJob]) { c.binJob = null; continue; }
+          if (c.path.length) continue;
+          c.binT = (c.binT || 0) + gdt; c.reaching = true;
+          if (c.binT > 2.2) {
+            (this.binBags[c.binJob] || []).forEach((bg) => { bg.tidy = true; }); this.binVersion++;
+            this.binOpen[c.binJob] = false; delete this.binJobs[c.binJob]; c.binJob = null; c.binT = 0; c.reaching = false;
+          }
+          continue;
+        }
+        if (this.phase.id === 'pushback' && this.phaseT < (c.id === 'purser' ? 12 : 4)) continue;
+        const d = this.binsInfo.doors.filter((x) => this.binOpen[x.id] && !this.binJobs[x.id] && Math.abs(x.x - this.player.x) > 1.2).sort((a, b2) => Math.abs(a.x - c.x) - Math.abs(b2.x - c.x))[0];
+        if (!d) { if (!c.path.length && c.home && Math.hypot(c.x - c.home.x, c.y - c.home.y) > 0.5) c.path = findPath(this.grid, c, c.home); continue; }
+        c.binJob = d.id; this.binJobs[d.id] = c.id; c.binT = 0;
+        c.path = findPath(this.grid, c, { x: d.x, y: d.side * 0.12 });
+      }
+    } else this.npcs.forEach((c) => { if (c.binJob) { delete this.binJobs[c.binJob]; c.binJob = null; c.reaching = false; } });
     for (const c of this.npcs) {
-      const moving = this.stepActor(c, dt);
+      const moving = this.stepActor(c, dt * (c.binJob ? 0.75 : 1));
       if (c.task && !moving) {
         c.work -= gdt;
         if (c.work <= 0) {
@@ -1008,7 +1065,7 @@ export class Flight {
     const id = this.phase.id;
     const P = this.sc.npc.purser, S = this.sc.npc.senior;
     const lines = {
-      pushback: [P, '艙門關閉，各艙門預位並交互檢查。'],
+      pushback: [P, '艙門關閉，各艙門預位並交互檢查。請大家一起把行李櫃關好！'],
       taxi: [P, '飛機開始滑行，請完成客艙安全檢查。'],
       takeoff: ['機長', '組員請就座，準備起飛。'],
       climb: [this.rank >= 3 ? this.npcs[0].name : S, '起飛完成，安全帶燈熄滅後可以開始準備服務。'],

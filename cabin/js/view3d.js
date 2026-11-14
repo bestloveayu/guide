@@ -988,11 +988,12 @@ export class View3D {
           this.walkers.set(seat, w);
         }
         const moving = Math.hypot(b.x - w.last.x, b.y - w.last.y) > 0.0008; w.last = { x: b.x, y: b.y };
-        w.mesh.position.copy(P(b.x, b.y, 0));
-        let dh = b.heading - w.mesh.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); w.mesh.rotation.y += dh * Math.min(1, dt * 8);
-        const stowK = b.state === 'stow' ? Math.min(1, b.stowT / 1.6) : 0;
+        const sway = moving ? Math.sin(t * 5.5 * (b.speed || 1) + (b.phase || 0)) * 0.025 : 0;
+        w.mesh.position.copy(P(b.x, b.y + (b.lat || 0) + sway, 0));
+        let dh = b.heading + (b.paused ? Math.sin(t * 1.3 + (b.phase || 0)) * 0.6 : 0) - w.mesh.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); w.mesh.rotation.y += dh * Math.min(1, dt * 8);
+        const stowK = b.state === 'stow' ? Math.min(1, b.stowT / Math.max(1.6, (b.stowDur || 1.8) - 0.4)) : 0;
         w.mesh.userData.setReach(b.state === 'stow' ? Math.sin(Math.min(1, stowK * 1.3) * Math.PI / 2) : 0);
-        w.mesh.userData.animate(t, moving, false, dt);
+        w.mesh.userData.animate(t * (b.speed || 1) + (b.phase || 0), moving, false, dt);
         if (w.bag) {
           if (b.state === 'walk') {
             // 拉在身後、略微傾斜
@@ -1450,6 +1451,8 @@ export class View3D {
         mm.position.copy(P(n.x, n.y, 0));
         if (n.heading != null) { let d = n.heading - mm.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); mm.rotation.y += d * Math.min(1, dt * 8); }
         mm.userData.animate(t, mv, false, dt);
+        if (mm.userData.setReach) mm.userData.setReach(n.reaching ? 0.6 + 0.4 * Math.sin(t * 3) : 0);
+        if (n.reaching && n.binJob && sim.binDoor) { const d = sim.binDoor(n.binJob); if (d) { let dd = Math.atan2(d.side * 1.5 - n.y, 0.0001) - mm.rotation.y; dd = Math.atan2(Math.sin(dd), Math.cos(dd)); mm.rotation.y += dd * Math.min(1, dt * 6); } }
       });
     }
 
@@ -1472,7 +1475,7 @@ export class View3D {
       eyeH = this.eyeH;
       const right = new THREE.Vector3(Math.sin(this.fpView.yaw), 0, Math.cos(this.fpView.yaw));
       const ry = this.player.rotation.y, fwd = new THREE.Vector3(Math.cos(ry), 0, -Math.sin(ry));
-      this.eye.position.copy(P(walker.x, walker.y, eyeH + bobY)).addScaledVector(right, bobX).addScaledVector(fwd, walker.seated ? 0.1 : 0.07);
+      this.eye.position.copy(P(walker.x, walker.y, eyeH + bobY)).addScaledVector(right, bobX).addScaledVector(fwd, walker.seated ? 0.12 : 0.12);
       this.eye.rotation.set(0, 0, 0, 'YXZ');
       this.eye.rotation.y = this.fpView.yaw - Math.PI / 2;
       this.eye.rotation.x = this.fpView.pitch;

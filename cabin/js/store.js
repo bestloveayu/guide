@@ -47,6 +47,10 @@ export function load() {
             Object.assign(t12, def.find((t) => t.id === 'T12'));
             sc.tasks.splice(sc.tasks.indexOf(t12) + 1, 0, def.find((t) => t.id === 'T26'));
           }
+          if (!sc.tasks.some((t) => t.id === 'T27') && sc.tasks.some((t) => t.id === 'T11')) {
+            const t27 = defaultScenario().tasks.find((t) => t.id === 'T27');
+            sc.tasks.splice(sc.tasks.findIndex((t) => t.id === 'T11'), 0, t27);
+          }
           sc.version = SCENARIO_VERSION;
         });
         // 範本更新：未經編輯的範本機艙換成最新版（例如新增組員休息室），保留 id

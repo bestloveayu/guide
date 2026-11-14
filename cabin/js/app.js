@@ -445,7 +445,7 @@ class App {
     const sc = this.scenario();
     const up = (k, conv = (v) => v, rerender = false) => (e) => { t[k] = conv(e.target.value); this.changed(rerender ? 'panel' : undefined); };
     const card = h('div', { class: 'card' });
-    const kinds = { talk: '對話（旅客/組員）', goto: '前往定點操作', walk: '客艙巡查', announce: '廣播', seated: '回組員座椅就座', manage: '組員管理（座艙長）' };
+    const kinds = { talk: '對話（旅客/組員）', goto: '前往定點操作', walk: '客艙巡查', announce: '廣播', seated: '回組員座椅就座', manage: '組員管理（座艙長）', cart: '推出餐車', service: '餐飲服務', bins: '關閉行李櫃' };
     card.append(
       field('任務名稱', h('input', { value: t.title, onchange: up('title', String, true) })),
       h('div', { class: 'row' },
@@ -884,8 +884,8 @@ class App {
       const acts = h('div', { class: 'acts' });
       if (t.status === 'delegated') acts.append(h('span', { class: 'muted' }, `👥 ${sim.npcs.find((n) => n.id === t.assignee)?.name || ''} 處理中…`));
       else {
-        if (t.def.kind !== 'announce' && t.def.kind !== 'manage') acts.append(h('button', { onclick: () => sim.goTo(t) }, t.def.kind === 'walk' ? '開始巡查' : '前往'));
-        if (t.def.kind !== 'walk' && t.def.kind !== 'manage') acts.append(h('button', { class: sim.inRange(t) ? 'primary' : '', disabled: !sim.inRange(t), onclick: () => sim.interact(t) }, t.def.kind === 'announce' ? '🎙 廣播' : '互動'));
+        if (t.def.kind !== 'announce' && t.def.kind !== 'manage') acts.append(h('button', { onclick: () => sim.goTo(t) }, t.def.kind === 'walk' ? '開始巡查' : t.def.kind === 'bins' ? '前往最近的行李櫃' : '前往'));
+        if (t.def.kind !== 'walk' && t.def.kind !== 'manage' && t.def.kind !== 'bins') acts.append(h('button', { class: sim.inRange(t) ? 'primary' : '', disabled: !sim.inRange(t), onclick: () => sim.interact(t) }, t.def.kind === 'announce' ? '🎙 廣播' : '互動'));
         if (sim.canDelegate(t)) {
           const free = sim.freeCrew();
           if (free.length) acts.append(h('select', { onchange: (e) => { if (e.target.value) sim.delegate(t, e.target.value); } }, h('option', { value: '' }, '指派給…'), free.map((c) => h('option', { value: c.id }, `${c.name}（能力 ${Math.round(c.skill * 100)}）`))));
@@ -893,6 +893,7 @@ class App {
       }
       let extra = '';
       if (t.def.kind === 'walk') extra = `・已巡查 ${t.covered.size}/${sim.rows.length} 排`;
+      if (t.def.kind === 'bins' && t.progress) extra = '・' + t.progress;
       list.append(h('div', { class: 'task', style: `border-left-color:${pr.color}` },
         h('div', { class: 'top' }, h('span', { class: 't' }, t.def.title), h('span', { class: 'pill', style: `background:${pr.color}` }, pr.name)),
         h('div', { class: 'meta' }, [tg, pax ? `${(PAX_TYPES[pax.type] || {}).icon || ''} ${pax.name}` : '', `剩 ${Math.ceil(t.remaining)}s`].filter(Boolean).join('・') + extra),
