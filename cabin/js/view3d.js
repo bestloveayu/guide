@@ -1627,12 +1627,13 @@ export class View3D {
             // 作用中的手往前伸
             const L = this.bagDrag.hand === 'L';
             this.binHands.children.forEach((c, i) => { const left = i < 2; c.position.x = (i % 2 ? 0.06 : -0.12) + ((left === L) ? 0.06 : -0.04); c.visible = true; });
-            return void 0;
           }
         }
-        const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
-        this.binHands.position.copy(this.camera.position).addScaledVector(fwd, 0.35 + 0.25 * r).add(new THREE.Vector3(0, -0.22 + 0.12 * r, 0));
-        this.binHands.quaternion.copy(this.camera.quaternion); this.binHands.rotateY(Math.PI / 2);
+        if (!this.bagDrag) {
+          const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+          this.binHands.position.copy(this.camera.position).addScaledVector(fwd, 0.35 + 0.25 * r).add(new THREE.Vector3(0, -0.22 + 0.12 * r, 0));
+          this.binHands.quaternion.copy(this.camera.quaternion); this.binHands.rotateY(Math.PI / 2);
+        }
       } else if (this.binHands) this.binHands.visible = false;
     }
     this.camera.updateProjectionMatrix();
