@@ -87,6 +87,12 @@ class App {
         if (e.code === 'KeyE' && !this.sim.modalOpen) { const a = this.sim.availableActions()[0]; if (a) a.run(); }
         if (e.code === 'KeyP') this.togglePause();
         if (e.code === 'Escape' && this.sim.binView) this.sim.exitBinView();
+        if (e.code === 'KeyV' && !this.sim.modalOpen && this.view === 'fp' && this.v3) {
+          const was = !!this.v3.winView, on = this.v3.toggleWindowView();
+          if (on) this.toast('窗邊', '看向窗外：拖曳滑鼠環顧，再按 V 或 Esc 返回');
+          else if (!was) this.toast('窗邊', '附近沒有窗戶，走近一點再按 V');
+        }
+        if (e.code === 'Escape' && this.v3 && this.v3.winView) this.v3.toggleWindowView(false);
         if (this.sim.modalOpen && /^Digit[1-9]$/.test(e.code)) { const b = document.querySelectorAll('.opt')[+e.code.slice(5) - 1]; if (b) b.click(); }
       }
       if (this.mode === 'edit' && this.view === '2d' && (e.code === 'Delete' || e.code === 'Backspace')) this.removeSelectedSeats();
@@ -118,7 +124,7 @@ class App {
     const map = {
       '2d': this.mode === 'play' ? '點擊地板或座位移動角色｜滾輪縮放、右鍵拖曳平移｜E 互動｜P 暫停' : '點選座位、Shift 多選、拖曳框選；點排號選整排｜滾輪縮放、右鍵拖曳平移｜Delete 移除座位',
       orbit: this.mode === 'play' ? '左鍵拖曳旋轉、右鍵/Shift 拖曳平移、滾輪縮放｜點人物對話、點地板移動｜E 互動' : '左鍵拖曳旋轉、右鍵/Shift 拖曳平移、滾輪縮放',
-      fp: '按住左鍵拖曳轉動視角｜點人物對話、點地板走過去｜WASD 移動、Shift 快走｜E 互動',
+      fp: '按住左鍵拖曳轉動視角｜點人物對話、點地板走過去｜WASD 移動、Shift 快走｜E 互動｜V 看窗外',
     };
     $('#hint').textContent = map[this.view];
   }

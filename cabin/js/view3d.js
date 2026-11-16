@@ -10,12 +10,48 @@ import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { Reflector } from 'three/addons/objects/Reflector.js';
+import { Sky } from 'three/addons/objects/Sky.js';
+import { makeWing, animateWing, makeGround, makeClouds } from './exterior.js';
 RectAreaLightUniformsLib.init();
 import { PAX_TYPES, PRIORITY } from './data.js';
 import { activeSeats, binDoors, roomLayout, LAV, lavLayout, bagPose, binCapacity } from './layout.js';
 import { M, materials, textures, seatAsset, passengerGeometry, PAX_MAT, makeCrew as buildCrew, makeCart, makeMealTray, makeSuitcase, makeBinBag, makePaxWalker } from './art.js';
 
 export const makeCrew = buildCrew;
+// 窗戶：牆面與外殼在窗位挖洞（看得到真實機外），陽光只從窗洞照進客艙（解析式光斑，不需高解析陰影）
+const WIN_GLSL = `
+uniform sampler2D uWinTex; uniform vec4 uWinA; uniform vec4 uWinB; uniform vec4 uWinC; uniform mat4 uCamToCabin;
+float winSdf(vec3 p, vec2 hs, float rad, float hc, bool shade) {
+  float k = floor((p.x - uWinA.x) / uWinA.y + 0.5);
+  if (k < 0.0 || k >= uWinA.z) return 1.0;
+  float info = texelFetch(uWinTex, ivec2(int(k), p.z > 0.0 ? 1 : 0), 0).r;
+  if (info > 0.99) return 1.0;
+  float down = shade ? info * 0.5 : 0.0;
+  vec2 d = vec2(p.x - (uWinA.x + k * uWinA.y), p.y - (hc - down * 0.5));
+  vec2 q = abs(d) - (vec2(hs.x, hs.y - down * 0.5) - rad);
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rad;
+}
+float sunWinMask(vec3 vp) {
+  if (uWinB.w < 0.5) return 1.0;
+  vec3 p = (uCamToCabin * vec4(vp, 1.0)).xyz;
+  vec2 yz = vec2(p.y - uWinB.z, p.z);
+  float c0 = dot(yz, yz);
+  if (c0 > (uWinB.y - 0.03) * (uWinB.y - 0.03) || p.x < 0.0 || p.x > uWinC.x) return 1.0;
+  vec3 sd = uWinC.yzw;
+  float a = sd.y * sd.y + sd.z * sd.z;
+  if (a < 1e-4) return 0.0;
+  float b = 2.0 * (yz.x * sd.y + yz.y * sd.z);
+  float c = c0 - uWinB.y * uWinB.y;
+  float t = (-b + sqrt(max(0.0, b * b - 4.0 * a * c))) / (2.0 * a);
+  float m = 1.0 - smoothstep(-0.012, 0.012, winSdf(p + t * sd, vec2(0.15, 0.21), 0.11, uWinA.w - 0.02, false));
+  if (c0 < (uWinB.x + 0.08) * (uWinB.x + 0.08)) { // 內襯牆面本身（含牆上的點）也必須通過內窗洞
+    c = c0 - uWinB.x * uWinB.x;
+    t = max(0.0, (-b + sqrt(max(0.0, b * b - 4.0 * a * c))) / (2.0 * a));
+    m *= 1.0 - smoothstep(-0.01, 0.01, winSdf(p + t * sd, vec2(0.097, 0.153), 0.07, uWinA.w, true));
+  }
+  return m;
+}
+`;
 const P = (x, y, h = 0) => new THREE.Vector3(x, h, -y); // 模擬座標 → three
 const CUT_H = 1.45;
 const EYE_H = 1.64;
@@ -157,7 +193,13 @@ export class View3D {
     this.envTex = pmrem.fromScene(new RoomEnvironment(this.renderer), 0.04).texture;
     this.scene.environment = this.envTex;
 
-    this.scene.fog = new THREE.Fog(0xbfd6ee, 80, 1400);
+    this.scene.fog = new THREE.FogExp2(0xcdb9a6, 0.00022);
+    // 夕陽：低角度、從左前方（左舷）照入
+    this.sunDir = new THREE.Vector3(-0.42, 0.15, 0.9).normalize();
+    this.winU = {
+      uWinTex: { value: null }, uWinA: { value: new THREE.Vector4(3.2, 0.53, 0, 1.1) }, uWinB: { value: new THREE.Vector4(2, 2.2, 1, 0) },
+      uWinC: { value: new THREE.Vector4(30, 0, 1, 0) }, uCamToCabin: { value: new THREE.Matrix4() }, uCabinInv: { value: new THREE.Matrix4() },
+    };
     this.hemi = new THREE.HemisphereLight(0xe8eeff, 0xc9bfb3, 0.35);
     this.scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(0xfff1dc, 1.7);
@@ -172,9 +214,19 @@ export class View3D {
     this.eye = new THREE.Object3D();
     this.cabin.add(this.eye);
 
-    this.skyCanvas = document.createElement('canvas'); this.skyCanvas.width = 4; this.skyCanvas.height = 256;
-    this.skyTex = new THREE.CanvasTexture(this.skyCanvas); this.skyTex.colorSpace = THREE.SRGBColorSpace;
-    this.scene.background = this.skyTex;
+    // 物理天空（大氣散射）＋ 由天空產生的機外反射環境
+    const mkSky = (scale) => {
+      const sky = new Sky(); sky.scale.setScalar(scale);
+      sky.material.uniforms.uGain = { value: 1 };
+      sky.material.fragmentShader = 'uniform float uGain;\n' + sky.material.fragmentShader.replace('gl_FragColor = vec4( retColor, 1.0 );', 'gl_FragColor = vec4( retColor * uGain, 1.0 );');
+      const u = sky.material.uniforms;
+      u.turbidity.value = 7; u.rayleigh.value = 2.2; u.mieCoefficient.value = 0.006; u.mieDirectionalG.value = 0.86; u.sunPosition.value.copy(this.sunDir);
+      return sky;
+    };
+    this.sky = mkSky(5000); this.sky.material.depthWrite = false; this.sky.renderOrder = -10;
+    this.scene.add(this.sky);
+    const envScene = new THREE.Scene(); const envSky = mkSky(50); envSky.material.uniforms.uGain.value = 1.0; envScene.add(envSky);
+    this.skyEnv = pmrem.fromScene(envScene, 0.02, 0.1, 100).texture;
     this.skyKey = '';
 
     this.composer = new EffectComposer(this.renderer);
@@ -212,56 +264,19 @@ export class View3D {
   }
 
   buildEnvironment() {
-    const rt = canvasTex(512, 256, (g) => {
-      g.fillStyle = '#6d7a5c'; g.fillRect(0, 0, 512, 256);
-      g.fillStyle = '#4a4d55'; g.fillRect(0, 70, 512, 116);
-      g.fillStyle = 'rgba(255,255,255,0.03)'; for (let i = 0; i < 300; i++) g.fillRect(Math.random() * 512, 70 + Math.random() * 116, 20 + Math.random() * 30, 1);
-      g.fillStyle = '#f2f2f2'; for (let x = 0; x < 512; x += 64) g.fillRect(x, 125, 34, 6);
-      g.fillRect(0, 76, 512, 4); g.fillRect(0, 176, 512, 4);
-      g.fillStyle = '#e0c25a'; for (let x = 20; x < 512; x += 128) { g.beginPath(); g.arc(x, 74, 2.5, 0, 7); g.fill(); g.beginPath(); g.arc(x, 182, 2.5, 0, 7); g.fill(); }
-    });
-    rt.wrapS = rt.wrapT = THREE.RepeatWrapping; rt.repeat.set(30, 1); rt.anisotropy = 8;
-    this.groundTex = rt;
-    const runway = new THREE.Mesh(new THREE.PlaneGeometry(6000, 90), new THREE.MeshStandardMaterial({ map: rt, roughness: 0.92 }));
-    runway.rotation.x = -Math.PI / 2; runway.receiveShadow = true;
-    const grass = new THREE.Mesh(new THREE.PlaneGeometry(12000, 12000), new THREE.MeshStandardMaterial({ color: 0x6c8256, roughness: 1 }));
-    grass.rotation.x = -Math.PI / 2; grass.position.y = -0.05; grass.receiveShadow = true;
-    this.groundGroup = new THREE.Group();
-    this.groundGroup.add(grass, runway);
-    const bm = new THREE.MeshStandardMaterial({ color: 0xd0d5dc, roughness: 0.8 });
-    const gm = new THREE.MeshPhysicalMaterial({ color: 0x86a9cf, roughness: 0.1, metalness: 0.3, clearcoat: 1 });
-    for (let i = 0; i < 6; i++) {
-      const b = new THREE.Mesh(new RoundedBoxGeometry(40 + i * 7, 10 + (i % 3) * 5, 22, 2, 1.5), i % 2 ? gm : bm);
-      b.position.set(-200 + i * 70, 6, -140 - (i % 2) * 20); this.groundGroup.add(b);
-    }
-    const tower = new THREE.Mesh(new THREE.CylinderGeometry(3, 4, 40, 24), bm); tower.position.set(160, 20, -170); this.groundGroup.add(tower);
-    const cab = new THREE.Mesh(new THREE.CylinderGeometry(7, 5, 6, 24), gm); cab.position.set(160, 42, -170); this.groundGroup.add(cab);
-    const tm = new THREE.MeshStandardMaterial({ color: 0x4d7448, roughness: 1 });
-    for (let i = 0; i < 60; i++) {
-      const t = new THREE.Mesh(new THREE.SphereGeometry(3 + Math.random() * 2.5, 12, 10), tm);
-      t.scale.y = 1.4; t.position.set(Math.random() * 1600 - 800, 5, (Math.random() > 0.5 ? 1 : -1) * (90 + Math.random() * 300)); this.groundGroup.add(t);
-    }
+    const gr = makeGround(this.skyEnv);
+    this.ground = gr; this.groundGroup = gr.group;
     this.scene.add(this.groundGroup);
-
-    this.clouds = new THREE.Group();
-    const cm = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.92 });
-    for (let i = 0; i < 45; i++) {
-      const cl = new THREE.Group();
-      const n = 4 + Math.floor(Math.random() * 5);
-      for (let k = 0; k < n; k++) {
-        const m = new THREE.Mesh(new THREE.SphereGeometry(6 + Math.random() * 9, 16, 12), cm);
-        m.position.set(k * 8 - n * 4, Math.random() * 4, Math.random() * 8 - 4); m.scale.y = 0.55;
-        cl.add(m);
-      }
-      cl.position.set(Math.random() * 1800 - 900, -25 - Math.random() * 50, (Math.random() - 0.5) * 1000);
-      this.clouds.add(cl);
-    }
+    this.clouds = makeClouds(this.skyEnv);
     this.scene.add(this.clouds);
+    this.scroll = 0; this.lateral = -160;
 
     this.winCanvas = document.createElement('canvas'); this.winCanvas.width = 64; this.winCanvas.height = 96;
     this.winTex = new THREE.CanvasTexture(this.winCanvas);
     this.winTex.colorSpace = THREE.SRGBColorSpace;
-    this.winMat = new THREE.MeshBasicMaterial({ map: this.winTex, toneMapped: false, color: new THREE.Color(1.45, 1.45, 1.45) });
+    this.winMat = new THREE.MeshBasicMaterial({ map: this.winTex, toneMapped: false, color: new THREE.Color(1.45, 1.45, 1.45) }); // 駕駛艙窗
+    // 客艙窗：薄玻璃（略帶色、反光），後面就是真實機外
+    this.glassMat = new THREE.MeshPhysicalMaterial({ color: '#7e8f9c', transparent: true, opacity: 0.07, roughness: 0.04, metalness: 0, depthWrite: false, envMapIntensity: 0.35 });
   }
 
   rebuild(force = false) {
@@ -320,6 +335,7 @@ export class View3D {
     });
     wallTex.wrapS = THREE.RepeatWrapping; wallTex.repeat.set(1 / 1.06, 1 / 1.6); wallTex.offset.x = -3.2 / 1.06 + 0.25;
     const wall = this.clipped(m.wall); wall.map = wallTex; wall.color = new THREE.Color('#ffffff');
+    const wallCut = this.clipped(m.wall); wallCut.map = wallTex; wallCut.color = new THREE.Color('#ffffff'); this.winPatch(wallCut, 1);
     const dadoTex = canvasTex(256, 64, (g) => { g.fillStyle = '#b9bcc0'; g.fillRect(0, 0, 256, 64); g.fillStyle = '#5c6068'; for (let x = 10; x < 256; x += 8) g.fillRect(x, 18, 4, 30); });
     dadoTex.wrapS = THREE.RepeatWrapping; dadoTex.repeat.set(1 / 0.53, 1 / 0.25);
     const kick = this.clipped(m.kick); kick.map = dadoTex; kick.color = new THREE.Color('#ffffff');
@@ -346,7 +362,7 @@ export class View3D {
       const shProf = smoothProfile([[R - 0.17, 1.64], [R - 0.3, 1.86], [R - 0.48, 2.02], [ix + 0.3, 2.1]], 6);
       spans.forEach(([a, b]) => {
         this.cabin.add(new THREE.Mesh(sweep([[R, 0], [R + 0.015, 0.25]], a, b, s), kick));
-        this.cabin.add(new THREE.Mesh(sweep(wallProf, a, b, s), wall));
+        this.cabin.add(new THREE.Mesh(sweep(wallProf, a, b, s), wallCut));
         const sh = new THREE.Mesh(sweep(shProf, a, b, s), ceil); sh.userData.ceiling = true; this.cabin.add(sh);
       });
       gaps.forEach(([a, b]) => {
@@ -454,15 +470,46 @@ export class View3D {
     const shadeMat = this.clipped(new THREE.MeshStandardMaterial({ color: '#d5d6d3', roughness: 0.6 }));
     const rnd = (k) => { const v = Math.sin(k * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
     const WY = 1.1, wr = R + 0.036, tilt = 0.24; // 窗戶中心高度 / 該高度的牆面半徑
+    const RO = R + 0.32, CY = 1.0;
+    // 窗位資料（給著色器）：每格 = 一個窗位，255 = 無窗（艙門附近），其餘 = 遮光板拉下比例
+    const nWin = Math.max(1, Math.floor((L - 1.6 - 3.2) / 0.53) + 2);
+    const wdata = new Uint8Array(256 * 2 * 4).fill(255);
+    const shadeDown = (x, s) => (rnd(x * 3 + s) < 0.3 ? 0.12 + rnd(x + s * 7) * 0.18 : 0.004);
+    xs.forEach((x) => { const k = Math.round((x - 3.2) / 0.53); if (k < 256) for (const s of [-1, 1]) wdata[((s > 0 ? 256 : 0) + k) * 4] = Math.round(Math.min(0.49, shadeDown(x, s)) / 0.5 * 255); });
+    if (this.winTexData) this.winTexData.dispose();
+    this.winTexData = new THREE.DataTexture(wdata, 256, 2, THREE.RGBAFormat);
+    this.winTexData.minFilter = this.winTexData.magFilter = THREE.NearestFilter; this.winTexData.needsUpdate = true;
+    this.winU.uWinTex.value = this.winTexData;
+    this.winXs = xs;
+    this.winU.uWinA.value.set(3.2, 0.53, Math.min(256, nWin), WY);
+    this.winU.uWinB.value.set(wr - 0.016, RO, CY, 0);
+    this.winU.uWinC.value.x = L;
+    // 窗洞內的通道（內襯到外殼）
+    const tunnelMat = this.clipped(new THREE.MeshStandardMaterial({ color: '#e6e6e2', emissive: '#3a3a38', roughness: 0.55, side: THREE.DoubleSide }));
+    const tunnelGeo = (s) => {
+      const inner = roundRect(0.194, 0.306, 0.07).getPoints(6), outer = roundRect(0.3, 0.42, 0.11).getPoints(6);
+      const pos = [];
+      const vin = (p) => [p.x, WY + p.y * Math.cos(tilt), s * (wr - 0.016 - p.y * Math.sin(tilt))];
+      const vout = (p) => { const h = WY - 0.02 + p.y; return [p.x, h, s * (Math.sqrt(Math.max(0, RO * RO - (h - CY) ** 2)) + 0.01)]; };
+      for (let i = 0; i < inner.length - 1; i++) {
+        const a = vin(inner[i]), b = vin(inner[i + 1]), c = vout(outer[i + 1]), d = vout(outer[i]);
+        pos.push(...a, ...b, ...c, ...a, ...c, ...d);
+      }
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.computeVertexNormals();
+      return g;
+    };
     for (const s of [-1, 1]) {
+      const tn = new THREE.InstancedMesh(tunnelGeo(s), tunnelMat, xs.length);
+      xs.forEach((x, i) => tn.setMatrixAt(i, M(x, 0, 0)));
+      this.cabin.add(tn);
       const rv = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.4, 0.525).rotateX(tilt), revealMat, xs.length);
-      const pn = new THREE.InstancedMesh(new THREE.ShapeGeometry(paneShape, 8).rotateX(tilt), this.winMat, xs.length);
+      const pn = new THREE.InstancedMesh(new THREE.ShapeGeometry(paneShape, 8).rotateX(tilt), this.glassMat, xs.length); pn.renderOrder = 3;
       const sh = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.21, 1).rotateX(tilt), shadeMat, xs.length);
       xs.forEach((x, i) => {
         const ry = s > 0 ? Math.PI : 0;
         rv.setMatrixAt(i, M(x, WY, s * (wr - 0.014), 0, ry, 0));
         pn.setMatrixAt(i, M(x, WY, s * (wr - 0.006), 0, ry, 0));
-        const down = rnd(x * 3 + s) < 0.3 ? 0.12 + rnd(x + s * 7) * 0.18 : 0.004; // 約三成窗戶遮光板拉下一部分
+        const down = shadeDown(x, s); // 約三成窗戶遮光板拉下一部分
         sh.setMatrixAt(i, M(x, WY + 0.15 - down / 2, s * (wr - 0.01), 0, ry, 0, 1, down, 1));
       });
       rv.renderOrder = 2;
@@ -491,9 +538,9 @@ export class View3D {
     }
 
     // 外殼
-    const RO = R + 0.32, CY = 1.0;
     const hull = this.clipped(m.hull);
-    const tube = new THREE.Mesh(new THREE.CylinderGeometry(RO, RO, L, 64, 1, true), hull);
+    const hullCut = this.clipped(m.hull); this.winPatch(hullCut, 2);
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(RO, RO, L, 96, 1, true), hullCut);
     tube.rotation.z = Math.PI / 2; tube.position.set(L / 2, CY, 0); this.cabin.add(tube);
     const bellyMat = this.clipped(m.hull); bellyMat.color = new THREE.Color('#c7cfda');
     const belly = new THREE.Mesh(new THREE.CylinderGeometry(RO + 0.004, RO + 0.004, L, 64, 1, true, Math.PI * 1.25, Math.PI * 0.5), bellyMat);
@@ -542,19 +589,12 @@ export class View3D {
       const st = new THREE.Mesh(new THREE.ExtrudeGeometry(stabShape, { depth: 0.1, bevelEnabled: true, bevelThickness: 0.02, bevelSize: 0.02, bevelSegments: 2 }), wingMat);
       st.rotation.x = Math.PI / 2 * s; st.position.set(L + tailLen * 0.25, CY + RO * 0.6, s * RO * 0.3); this.cabin.add(st);
     }
-    const span = Math.max(W * 3.2, 10), chord = Math.max(4, L * 0.16);
-    const wingShape = new THREE.Shape();
-    wingShape.moveTo(0, 0); wingShape.lineTo(chord, 0); wingShape.lineTo(chord + span * 0.55, span); wingShape.lineTo(chord * 0.35 + span * 0.55, span); wingShape.lineTo(0, 0);
-    const wx = L * 0.42;
-    for (const s of [-1, 1]) {
-      const wg = new THREE.Mesh(new THREE.ExtrudeGeometry(wingShape, { depth: 0.2, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 3 }), wingMat);
-      wg.rotation.x = Math.PI / 2 * s; wg.position.set(wx, -0.55, s * RO * 0.6); wg.castShadow = true; this.cabin.add(wg);
-      const engPts = [[0.0, 0], [RO * 0.38, 0.05], [RO * 0.43, chord * 0.2], [RO * 0.42, chord * 0.55], [RO * 0.3, chord * 0.8], [RO * 0.12, chord * 0.86], [0, chord * 0.9]].map(([r, y]) => new THREE.Vector2(r, y));
-      const eng = new THREE.Mesh(new THREE.LatheGeometry(engPts, 48), new THREE.MeshPhysicalMaterial({ color: 0xe9edf2, roughness: 0.25, clearcoat: 0.8 }));
-      eng.rotation.z = -Math.PI / 2; eng.position.set(wx + span * 0.1 - chord * 0.3, -1.2, s * (RO + span * 0.28)); eng.castShadow = true; this.cabin.add(eng);
-      const intake = new THREE.Mesh(new THREE.CircleGeometry(RO * 0.34, 40), new THREE.MeshStandardMaterial({ color: 0x23262d, metalness: 0.6, roughness: 0.4 }));
-      intake.rotation.y = -Math.PI / 2; intake.position.set(eng.position.x + 0.06, -1.2, eng.position.z); this.cabin.add(intake);
-    }
+    // 主翼與發動機（翼型斷面、可動襟翼／擾流板、翼尖小翼、航行燈）
+    const span = Math.max(W * 4.2, 11), chord = Math.max(4, L * 0.16);
+    this.wings = [-1, 1].map((s) => {
+      const w = makeWing({ s, rootX: L * 0.4, rootY: -0.5, rootZ: RO * 0.55, c0: chord, b: span, env: this.skyEnv, accent });
+      this.cabin.add(w.group); return w;
+    });
 
     // 座位
     const seats = activeSeats(ac);
@@ -652,7 +692,15 @@ export class View3D {
     }
     this.trays = new Map();
     this.cabin.traverse((o) => { if (o.isMesh && !(o.material && o.material.isMeshBasicMaterial)) o.receiveShadow = true; });
+    this.patchSunAll();
     this.applyMode();
+  }
+
+  patchSunAll() {
+    this.cabin.traverse((o) => {
+      if (!o.material) return;
+      (Array.isArray(o.material) ? o.material : [o.material]).forEach((mm) => { if (!(this.winPatched && this.winPatched.has(mm))) this.winPatch(mm, 0); });
+    });
   }
 
   // 環境反射強度：棚燈環境貼圖很亮，依視角調低，避免白色表面過曝
@@ -662,8 +710,30 @@ export class View3D {
     this.envI = v; this.envDirty = false;
     this.scene.traverse((o) => {
       if (!o.material) return;
-      (Array.isArray(o.material) ? o.material : [o.material]).forEach((mm) => { if ('envMapIntensity' in mm) mm.envMapIntensity = v; });
+      (Array.isArray(o.material) ? o.material : [o.material]).forEach((mm) => { if ('envMapIntensity' in mm && !mm.userData.ext && mm !== this.glassMat) mm.envMapIntensity = v; });
     });
+  }
+
+  // 注入窗洞與陽光遮罩（cut：0 只有光斑遮罩、1 牆面挖洞、2 外殼挖洞）
+  winPatch(mat, cut = 0) {
+    if (!mat || !mat.isMeshStandardMaterial || mat.userData.ext) return;
+    const reg = this.winPatched || (this.winPatched = new WeakMap());
+    if (reg.get(mat) === cut + 1) return;
+    reg.set(mat, cut + 1);
+    const U = this.winU;
+    mat.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, U);
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + WIN_GLSL + (cut ? 'varying vec3 vCabP;\n' : ''))
+        .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );', 'getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= sunWinMask( geometryPosition );'));
+      if (cut) {
+        sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform mat4 uCabinInv;\nvarying vec3 vCabP;')
+          .replace('#include <project_vertex>', '#include <project_vertex>\n\tvCabP = (uCabinInv * modelMatrix * vec4(transformed, 1.0)).xyz;');
+        const hs = cut === 1 ? 'vec2(0.112, 0.17), 0.08, uWinA.w' : 'vec2(0.15, 0.21), 0.11, uWinA.w - 0.02';
+        sh.fragmentShader = sh.fragmentShader.replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\n\tif (abs(vCabP.z) > 1.0 && winSdf(vCabP, ${hs}, false) < 0.0) discard;`);
+      }
+    };
+    mat.customProgramCacheKey = () => 'win' + cut;
+    mat.needsUpdate = true;
   }
 
   addFixture(f, ac, accent) {
@@ -1153,6 +1223,52 @@ export class View3D {
   }
 
   // 行李櫃視角：鏡頭移到走道上，抬頭看著打開的行李櫃
+  // 看窗外：鏡頭移到最近的窗邊（坐姿高度），可拖曳小幅轉動
+  toggleWindowView(on) {
+    if (on === undefined) on = !this.winView;
+    if (!on) { this.winView = null; return false; }
+    const sim = this.app.sim, walker = sim && sim.player;
+    if (!walker || this.mode !== 'fp' || !(this.winXs || []).length) return false;
+    const fz = -Math.cos(this.fpView.yaw - Math.PI / 2);
+    const s = fz >= 0 ? 1 : -1;
+    let best = this.winXs[0]; this.winXs.forEach((x) => { if (Math.abs(x - walker.x) < Math.abs(best - walker.x)) best = x; });
+    if (Math.abs(best - walker.x) > 2.5) return false;
+    // 機翼附近預設往後看（看得到機翼與發動機），其他位置往前下方看
+    const L = this.app.aircraft().length;
+    this.winView = { x: best, s, az: best > L * 0.3 && best < L * 0.62 ? 0.5 : -0.3 }; this.winLook = { yaw: 0, pitch: 0 };
+    return true;
+  }
+
+  windowCamera(sim, dt) {
+    if (this.winView && (this.mode !== 'fp' || !sim || sim.binView || sim.modalOpen)) this.winView = null;
+    const want = this.winView ? 1 : 0;
+    this.winBlend = (this.winBlend || 0) + (want - (this.winBlend || 0)) * Math.min(1, dt * 3);
+    const hide = this.winBlend > 0.25 && this.lastWin;
+    // 靠窗旅客暫時隱藏，避免鏡頭穿進頭部
+    const ac = this.app.aircraft(), R = ac.width / 2;
+    if (hide || this.winHidden) {
+      this.paxMeshes.forEach((g, seat) => {
+        const st = ac.seats.find((z) => z.id === seat); if (!st) return;
+        const near = hide && Math.sign(-st.y) === this.lastWin.s && Math.abs(st.x - this.lastWin.x) < 0.75 && Math.abs(st.y) > R - 1.0;
+        if (near) g.visible = false; else if (this.winHidden && this.winHidden.has(seat)) g.visible = true;
+      });
+      this.winHidden = hide ? new Set([...this.paxMeshes.keys()].filter((k) => !this.paxMeshes.get(k).visible)) : null;
+    }
+    if (this.winBlend < 0.002) return;
+    const wv = this.winView || this.lastWin; if (!wv) return;
+    this.lastWin = wv;
+    const lk = this.winLook || { yaw: 0, pitch: 0 };
+    const az = (wv.az ?? -0.3) + lk.yaw, el = -0.24 + lk.pitch;
+    const pos = new THREE.Vector3(wv.x - Math.sin(az) * 0.09, 1.16, wv.s * (R - 0.02)); // 臉貼近窗戶
+    const dir = new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), wv.s * Math.cos(az) * Math.cos(el));
+    this.cabin.updateMatrixWorld(true);
+    const wp = pos.clone().applyMatrix4(this.cabin.matrixWorld), wl = pos.clone().add(dir).applyMatrix4(this.cabin.matrixWorld);
+    const tmp = this.tmpCam || (this.tmpCam = new THREE.PerspectiveCamera()); tmp.position.copy(wp); tmp.lookAt(wl);
+    this.camera.position.lerp(wp, this.winBlend);
+    this.camera.quaternion.slerp(tmp.quaternion, this.winBlend);
+    this.camera.fov += (62 - this.camera.fov) * this.winBlend; this.camera.near = 0.02;
+  }
+
   binCamera(sim, dt) {
     const want = sim && sim.binView ? 1 : 0;
     this.binBlend = (this.binBlend || 0) + (want - (this.binBlend || 0)) * Math.min(1, dt * 4);
@@ -1246,9 +1362,16 @@ export class View3D {
     // 環境光遮蔽只在第一人稱使用（剖面視角中被裁切的幾何會造成錯誤陰影）
     if (this.gtao) this.gtao.enabled = fp && this.quality === 'high';
     if (this.bloom) this.bloom.enabled = this.quality !== 'low';
-    this.sun.castShadow = !fp && this.quality !== 'low';
+    this.sun.castShadow = fp ? this.quality === 'high' : this.quality !== 'low';
     this.hemi.intensity = fp ? 0.2 : 0.75; // 補光：避免臉部下半部過暗
-    this.sun.intensity = fp ? 0.0 : 1.7; // 機艙內不該有穿透機頂的直射陽光
+    // 第一人稱：暖色夕陽只從窗洞照入（著色器遮罩）；剖面視角：較高的暖色日光照亮客艙
+    this.sun.intensity = fp ? 6.0 : 1.9;
+    this.sun.color.set(fp ? '#ffb06a' : '#ffe6c8');
+    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.normalBias = fp ? 0.01 : 0.025;
+    if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; }
+    this.sun.shadow.camera.right = -1;
+    this.winU.uWinB.value.w = fp ? 1 : 0;
   }
 
   setMode(mode) {
@@ -1297,6 +1420,12 @@ export class View3D {
       if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 4) drag.moved = true;
       drag.x = e.clientX; drag.y = e.clientY;
       if (!drag.moved) return;
+      if (this.mode === 'fp' && this.winView) {
+        const lk = this.winLook;
+        lk.yaw = Math.max(-0.75, Math.min(0.75, lk.yaw - dx * 0.003 * this.winView.s));
+        lk.pitch = Math.max(-0.45, Math.min(0.4, lk.pitch - dy * 0.003));
+        return;
+      }
       if (this.mode === 'fp') {
         // 按住滑鼠拖曳才轉動視角（不鎖定游標）
         this.fp.yaw -= dx * 0.0042;
@@ -1401,17 +1530,17 @@ export class View3D {
 
   updateSky(env) {
     const a = Math.min(1, env.alt / 35000);
-    const key = a.toFixed(2);
+    const key = a.toFixed(2) + this.mode;
+    this.sky.position.copy(this.camera.position);
     if (key === this.skyKey) return;
     this.skyKey = key;
-    const g = this.skyCanvas.getContext('2d');
-    const top = new THREE.Color().setHSL(0.6, 0.55, THREE.MathUtils.lerp(0.6, 0.3, a));
-    const hor = new THREE.Color().setHSL(0.58, 0.4, THREE.MathUtils.lerp(0.86, 0.8, a));
-    const gr = g.createLinearGradient(0, 0, 0, 256);
-    gr.addColorStop(0, '#' + top.getHexString()); gr.addColorStop(0.75, '#' + hor.getHexString()); gr.addColorStop(1, '#' + hor.getHexString());
-    g.fillStyle = gr; g.fillRect(0, 0, 4, 256);
-    this.skyTex.needsUpdate = true;
-    this.scene.fog.color.copy(hor).convertSRGBToLinear();
+    // 高度越高：空氣越乾淨、天空越深藍；霧（大氣透視）越淡
+    const u = this.sky.material.uniforms;
+    u.rayleigh.value = THREE.MathUtils.lerp(2.2, 0.9, a);
+    u.turbidity.value = THREE.MathUtils.lerp(7, 2.2, a);
+    u.uGain.value = this.mode === 'fp' ? 1.0 : 0.8;
+    this.scene.fog.color.set('#cdb9a6').lerp(new THREE.Color('#b4c3d8'), a);
+    this.scene.fog.density = THREE.MathUtils.lerp(0.00022, 0.00009, a);
   }
 
   render(sim, walker, dt) {
@@ -1432,20 +1561,40 @@ export class View3D {
     this.cabin.updateMatrixWorld(true);
     this.clipWorld.copy(this.clipLocal).applyMatrix4(this.cabin.matrixWorld);
 
-    this.sun.position.set(L / 2 + 12, 30, 18);
-    this.sun.target.position.set(L / 2, 0, 0);
-    const scam = this.sun.shadow.camera, ext = L / 2 + 6;
-    if (scam.right !== ext) { scam.left = -ext; scam.right = ext; scam.top = ext; scam.bottom = -ext; scam.near = 1; scam.far = 90; scam.updateProjectionMatrix(); }
+    const fpSun = this.mode === 'fp';
+    const scam = this.sun.shadow.camera;
+    if (fpSun) {
+      // 第一人稱：夕陽從窗戶斜射進來；陰影只涵蓋玩家附近（座椅、乘客擋光）
+      const c = new THREE.Vector3(); this.eye.getWorldPosition(c);
+      this.sun.target.position.copy(c);
+      this.sun.position.copy(c).addScaledVector(this.sunDir, 40);
+      const ext = 7;
+      if (scam.right !== ext) { scam.left = -ext; scam.right = ext; scam.top = ext; scam.bottom = -ext; scam.near = 20; scam.far = 60; scam.updateProjectionMatrix(); }
+    } else {
+      this.sun.position.set(L / 2 - 14, 26, 24);
+      this.sun.target.position.set(L / 2, 0, 0);
+      const ext = L / 2 + 6;
+      if (scam.right !== ext) { scam.left = -ext; scam.right = ext; scam.top = ext; scam.bottom = -ext; scam.near = 1; scam.far = 90; scam.updateProjectionMatrix(); }
+    }
 
+    // 機外：地面捲動、滑行時跑道在右側、起降時對正跑道；襟翼與擾流板依階段作動
     const altM = env.alt * 0.3048;
+    const ph = sim ? sim.phase.id : 'boarding', pt = sim ? sim.phaseT / sim.phase.dur : 0;
+    this.scroll += env.speed * 0.514 * dt;
+    const latT = ['takeoff', 'climb', 'cruise', 'descent', 'landing'].includes(ph) ? 0 : -160;
+    this.lateral += (latT - this.lateral) * Math.min(1, dt * 0.35);
+    this.ground.update(this.scroll, this.lateral);
     this.groundGroup.position.y = -1.32 - Math.min(altM, 3000) * 0.6;
     this.groundGroup.visible = altM < 4500;
-    this.groundTex.offset.x = (env.groundScroll / 200) % 1;
     this.clouds.visible = env.alt > 6000;
     this.clouds.position.y = env.alt > 30000 ? -40 : 10;
-    this.clouds.children.forEach((c) => { c.position.x -= env.speed * 0.025 * dt * 10; if (c.position.x < -900) c.position.x += 1800; });
+    this.clouds.children.forEach((c) => { if (!c.userData.puff) return; c.position.x += env.speed * 0.025 * dt * 10; if (c.position.x > 1000) c.position.x -= 2000; });
+    (this.clouds.userData.deck || []).forEach((tx, i) => { tx.offset.x -= env.speed * 0.514 * dt / (i ? 3300 : 2000); });
     this.updateSky(env);
-    this.scene.fog.far = env.alt > 10000 ? 3500 : 1400;
+    const flap = ({ taxi: 0.45, takeoff: 0.45, climb: pt < 0.3 ? 0.45 : 0, descent: pt > 0.8 ? 0.55 : 0, landing: 1, deplane: 0 })[ph] || 0;
+    const spoiler = ph === 'landing' && pt > 0.52 ? 1 : 0;
+    const rpm = ({ boarding: 0.4, pushback: 6, taxi: 12, takeoff: 45, climb: 42, cruise: 34, descent: 16, landing: pt > 0.52 ? 36 : 18, deplane: 2 })[ph] || 0;
+    (this.wings || []).forEach((w) => animateWing(w, flap, spoiler, rpm, t, dt));
 
     // 客艙燈光情境
     const mood = env.lights < 0.6 ? [0.55, 0.7, 1.35] : env.lights < 0.95 ? [1.0, 0.82, 0.62] : [1, 1, 1];
@@ -1600,6 +1749,7 @@ export class View3D {
       this.camera.fov = 45; this.camera.near = 0.1;
     }
     this.binCamera(sim, dt);
+    this.windowCamera(sim, dt);
     // 行李櫃視角：隱藏自己的身體，只在整理時顯示伸出的雙手
     if (this.player) {
       const inBin = (this.binBlend || 0) > 0.3;
@@ -1642,6 +1792,17 @@ export class View3D {
       const wp = new THREE.Vector3(); mr.mesh.getWorldPosition(wp);
       mr.mesh.visible = this.mode === 'fp' && this.camera.position.distanceTo(wp) < 2.6 && !!(sim && (sim.doorOpen[mr.f.id] || sim.inLav(mr.f)));
     });
+
+    this.camera.updateMatrixWorld();
+    this.winU.uCabinInv.value.copy(this.cabin.matrixWorld).invert();
+    this.winU.uCamToCabin.value.multiplyMatrices(this.winU.uCabinInv.value, this.camera.matrixWorld);
+    const sc = this.sunDir.clone().transformDirection(this.winU.uCabinInv.value);
+    this.winU.uWinC.value.set(this.winU.uWinC.value.x, sc.x, sc.y, sc.z);
+    // 第一人稱陰影每 3 幀更新一次（光斑由著色器計算，陰影只負責座椅與人的遮擋）
+    this.frameNo = (this.frameNo || 0) + 1;
+    this.renderer.shadowMap.autoUpdate = this.mode !== 'fp';
+    if (this.mode === 'fp') this.renderer.shadowMap.needsUpdate = this.frameNo % 3 === 0;
+    this.sky.position.copy(this.camera.position);
 
     if (this.quality === 'low') this.renderer.render(this.scene, this.camera);
     else this.composer.render(dt);
